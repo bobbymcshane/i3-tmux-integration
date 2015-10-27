@@ -1,0 +1,3 @@
+[submodule "i3ipc-glib"]
+	path = i3ipc-glib
+	url = https://github.com/bobbymcshane/i3ipc-glib.git
