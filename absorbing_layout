@@ -1,0 +1,1 @@
+{"type":"con","layout":"splith","nodes":[{"type":"con","swallows" :[{"class":".*"}]},{"exec": "gnome-terminal","type":"con"}]}
