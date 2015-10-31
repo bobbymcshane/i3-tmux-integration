@@ -10,6 +10,7 @@ typedef unsigned int uint_t;
 #define LAYOUT_CHANGE_CMD "layout-change"
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
 
+int g_pane_count;
 void i3_layout_construct( JsonBuilder* builder ) {
      GError *err = NULL;
      JsonParser *parser;
@@ -70,6 +71,7 @@ void i3_layout_construct( JsonBuilder* builder ) {
                json_builder_end_array( builder );
                json_builder_end_object( builder );
                ungetc(bufchar, stdin);
+               g_pane_count++;
                return;
           case '{':
                json_builder_set_member_name( builder, "layout" );
@@ -137,6 +139,7 @@ gint main() {
                     /* TODO: MORE INTENSE LAYOUTS LATER */
                     
                     JsonBuilder* builder = json_builder_new();
+                    g_pane_count = 0;
                     i3_layout_construct( builder );
 
                     /* Generate a string from the JsonBuilder */
@@ -158,7 +161,14 @@ gint main() {
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                     g_printf("Reply: %s\n", reply);
                     g_free(reply);
-                    //remove ( tmpfile );
+                    remove ( tmpfile );
+                    sprintf( i3_cmd, "exec gnome-terminal" );
+                    while ( g_pane_count > 0 ) {
+                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                         g_printf("Reply: %s\n", reply);
+                         g_free(reply);
+                         g_pane_count--;
+                    }
                }
           }
           else {
