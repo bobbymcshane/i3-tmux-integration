@@ -19,12 +19,12 @@ void i3_layout_construct( JsonBuilder* builder ) {
      json_builder_add_string_value( builder, "con" );
 
      /* TODO: DO we always have the id? */
-     uint_t sx, sy, xoff, yoff, wp_id;
+     uint_t sx, sy, xoff, yoff;
 
      if ( scanf( "%ux%u,%u,%u", &sx, &sy, &xoff, &yoff) != 4 )
           return;
 
-     char saved[BUFSIZ];
+     char wp_id[BUFSIZ];
      char bufchar = fgetc(stdin);
 	if ( bufchar == ',') {
           uint_t saved_val;
@@ -32,13 +32,15 @@ void i3_layout_construct( JsonBuilder* builder ) {
                bufchar = fgetc(stdin);
                if (bufchar == 'x') {
                     ungetc('x', stdin);
-                    sprintf( saved, "%u", saved_val );
+                    sprintf( wp_id, "%u", saved_val );
                     int i;
-                    for( i = strlen(saved)-1; i >= 0; i-- ) {
-                         ungetc( saved[ i ], stdin );
+                    for( i = strlen(wp_id)-1; i >= 0; i-- ) {
+                         ungetc( wp_id[ i ], stdin );
                     }
+                    wp_id[0] = '\0';
                }
                else {
+                    sprintf( wp_id, "pane%u", saved_val );
                     ungetc( bufchar, stdin );
                }
           }
@@ -54,11 +56,16 @@ void i3_layout_construct( JsonBuilder* builder ) {
           case ',':
           case '}':
           case ']':
+               if ( wp_id[0] != '\0' ) {
+                    printf("MARKING\n");
+                    json_builder_set_member_name( builder, "mark" );
+                    json_builder_add_string_value( builder, wp_id );
+               }
                json_builder_set_member_name( builder, "swallows" );
                json_builder_begin_array( builder );
                json_builder_begin_object( builder );
                json_builder_set_member_name( builder, "class" );
-               json_builder_add_string_value( builder, ".*" );
+               json_builder_add_string_value( builder, "^Gnome\\-terminal$" );
                json_builder_end_object( builder );
                json_builder_end_array( builder );
                json_builder_end_object( builder );
@@ -112,6 +119,7 @@ gint main() {
      char bufchar;
      char endc;
      int workspace, n_scanned;
+
      while ( 1 ) {
           if (scanf( "%%%s @%d", tmux_cmd, &workspace ) == 2 ) {
                /* REACHED LINE END */
