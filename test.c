@@ -1,14 +1,104 @@
+#define _XOPEN_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <glib/gprintf.h>
 #include <json-glib/json-glib.h>
 #include <i3ipc-glib/i3ipc-glib.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <ctype.h>
 
 typedef unsigned int uint_t;
 #define WINDOW_ADD_CMD "window-add"
 #define LAYOUT_CHANGE_CMD "layout-change"
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
+#define ISODIGIT(c) ((int)(c) >= '0' && (int)(c) <= '7')
+
+char *
+unescape(char *orig)
+{
+     char c, *cp, *new = orig;
+     int i;
+
+     for (cp = orig; (*orig = *cp); cp++, orig++) {
+          if (*cp != '\\')
+               continue;
+
+          switch (*++cp) {
+          case 'a': /* alert (bell) */
+               *orig = '\a';
+               continue;
+          case 'b': /* backspace */
+               *orig = '\b';
+               continue;
+          case 'e': /* escape */
+               *orig = '\e';
+               continue;
+          case 'f': /* formfeed */
+               *orig = '\f';
+               continue;
+          case 'n': /* newline */
+               *orig = '\n';
+               continue;
+          case 'r': /* carriage return */
+               *orig = '\r';
+               continue;
+          case 't': /* horizontal tab */
+               *orig = '\t';
+               continue;
+          case 'v': /* vertical tab */
+               *orig = '\v';
+               continue;
+          case '\\':     /* backslash */
+               *orig = '\\';
+               continue;
+          case '\'':     /* single quote */
+               *orig = '\'';
+               continue;
+          case '\"':     /* double quote */
+               *orig = '"';
+               continue;
+          case '0':
+          case '1':
+          case '2':
+          case '3': /* octal */
+          case '4':
+          case '5':
+          case '6':
+          case '7': /* number */
+               for (i = 0, c = 0;
+                    ISODIGIT((unsigned char)*cp) && i < 3;
+                    i++, cp++) {
+                    c <<= 3;
+                    c |= (*cp - '0');
+               }
+               *orig = c;
+               --cp;
+               continue;
+          case 'x': /* hexidecimal number */
+               cp++;     /* skip 'x' */
+               for (i = 0, c = 0;
+                    isxdigit((unsigned char)*cp) && i < 2;
+                    i++, cp++) {
+                    c <<= 4;
+                    if (isdigit((unsigned char)*cp))
+                         c |= (*cp - '0');
+                    else
+                         c |= ((toupper((unsigned char)*cp) -
+                             'A') + 10);
+               }
+               *orig = c;
+               --cp;
+               continue;
+          default:
+               --cp;
+               break;
+          }
+     }
+
+     return (new);
+}
 
 int g_pane_count;
 void i3_layout_construct( JsonBuilder* builder ) {
@@ -58,7 +148,6 @@ void i3_layout_construct( JsonBuilder* builder ) {
           case '}':
           case ']':
                if ( wp_id[0] != '\0' ) {
-                    printf("MARKING\n");
                     json_builder_set_member_name( builder, "mark" );
                     json_builder_add_string_value( builder, wp_id );
                }
@@ -69,6 +158,7 @@ void i3_layout_construct( JsonBuilder* builder ) {
                json_builder_add_string_value( builder, "^Gnome\\-terminal$" );
                json_builder_end_object( builder );
                json_builder_end_array( builder );
+               
                json_builder_end_object( builder );
                ungetc(bufchar, stdin);
                g_pane_count++;
@@ -120,15 +210,56 @@ gint main() {
      char i3_cmd[BUFSIZ];
      char bufchar;
      char endc;
-     int workspace, n_scanned;
+     int workspace, n_scanned, pane;
 
+     pid_t i;
+     int fds, fdm, status;
+
+     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
+
+     /* Open a new unused tty */
+     fdm = posix_openpt(O_RDWR);
+     grantpt(fdm);
+     unlockpt(fdm);
+
+     printf("pts/%s\n", ptsname(fdm));
+     //close(0); /* Don't close stdin */
+     close(1);
+     close(2);
+
+     i = fork();
+     if ( i == 0 ) { // parent
+          dup(fdm);
+          dup(fdm);
+          dup(fdm);
+          //waitpid(i, &status, 0);
+     } else {  // child
+          fds = open(ptsname(fdm), O_RDWR);
+          dup(fds);
+          dup(fds);
+          dup(fds);
+          strcpy(buf, (ptsname(fdm)));
+          /* Spawn a urxvt terminal which looks at the specified pty */
+          sprintf(buf, "urxvt -pty-fd %c/2", basename(buf));
+          system(buf);
+          exit(0);
+     }
+     /* END PRINT TO OTHER TERMINAL TEST */
      while ( 1 ) {
+          if (scanf( "%%%s %%%d", tmux_cmd, &pane ) == 2) {
+               if ( !strcmp( tmux_cmd, "output" ) ) {
+                    fgets( buf, BUFSIZ, stdin); 
+                    //printf( "%s", buf);
+                    buf[(strlen(buf)-1)] = '\0';
+                    printf( "%s", unescape(buf));
+               }
+#if 0
           if (scanf( "%%%s @%d", tmux_cmd, &workspace ) == 2 ) {
                /* REACHED LINE END */
                if ( !strcmp( tmux_cmd, WINDOW_ADD_CMD ) ) {
                     sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    g_printf("Reply: %s\n", reply);
+                    //g_printf("Reply: %s\n", reply);
                     g_free(reply);
                }
                if ( !strcmp( tmux_cmd, LAYOUT_CHANGE_CMD ) ) {
@@ -159,23 +290,25 @@ gint main() {
                     close( layout_fd );
                     sprintf( i3_cmd, "workspace %d, append_layout %s", workspace, tmpfile );
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    g_printf("Reply: %s\n", reply);
+                    //g_printf("Reply: %s\n", reply);
                     g_free(reply);
-                    remove ( tmpfile );
-                    sprintf( i3_cmd, "exec gnome-terminal" );
-                    while ( g_pane_count > 0 ) {
+                    /* Strategy move window to mark then kill the marked pane */
+                    //remove ( tmpfile );
+                    //sprintf( i3_cmd, "exec gnome-terminal" );
+                    /*while ( g_pane_count > 0 ) {
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_printf("Reply: %s\n", reply);
                          g_free(reply);
                          g_pane_count--;
-                    }
+                    }*/
                }
+#endif
           }
           else {
 next_cmd:
                /* Seek to end of line */
                fgets( buf, BUFSIZ, stdin); 
-               printf("%s\n", buf);
+               //printf("%s", buf);
           }
           bufchar = fgetc( stdin );
           if ( bufchar == EOF )

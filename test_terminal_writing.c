@@ -16,6 +16,7 @@ int main() {
      grantpt(fdm);
      unlockpt(fdm);
 
+     printf("pts/%s\n", ptsname(fdm));
      close(0);
      close(1);
      close(2);
@@ -35,7 +36,7 @@ int main() {
           dup(fds);
           dup(fds);
           strcpy(buf, ptsname(fdm));
-          /* Spawn a urxvt terminal which looks at the specified tty */
+          /* Spawn a urxvt terminal which looks at the specified pty */
           sprintf(buf, "urxvt -pty-fd %c/2", basename(buf));
           system(buf);
           exit(0);
