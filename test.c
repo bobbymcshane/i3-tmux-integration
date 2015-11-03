@@ -216,6 +216,7 @@ gint main() {
      int fds, fdm, status;
 
      /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
+#if 0
 
      /* Open a new unused tty */
      fdm = posix_openpt(O_RDWR);
@@ -245,15 +246,18 @@ gint main() {
           exit(0);
      }
      /* END PRINT TO OTHER TERMINAL TEST */
+#endif
      while ( 1 ) {
+#if 1
           if (scanf( "%%%s %%%d", tmux_cmd, &pane ) == 2) {
                if ( !strcmp( tmux_cmd, "output" ) ) {
                     fgets( buf, BUFSIZ, stdin); 
                     //printf( "%s", buf);
                     buf[(strlen(buf)-1)] = '\0';
                     printf( "%s", unescape(buf));
+                    fflush(stdout);
                }
-#if 0
+#else
           if (scanf( "%%%s @%d", tmux_cmd, &workspace ) == 2 ) {
                /* REACHED LINE END */
                if ( !strcmp( tmux_cmd, WINDOW_ADD_CMD ) ) {
