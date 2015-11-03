@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <glib/gprintf.h>
@@ -7,198 +6,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
-#include <ctype.h>
+#include "tmux_commands.h"
+#include "parse.h"
+#include <string.h>
 
 typedef unsigned int uint_t;
-#define WINDOW_ADD_CMD "window-add"
-#define LAYOUT_CHANGE_CMD "layout-change"
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
-#define ISODIGIT(c) ((int)(c) >= '0' && (int)(c) <= '7')
-
-char *
-unescape(char *orig)
-{
-     char c, *cp, *new = orig;
-     int i;
-
-     for (cp = orig; (*orig = *cp); cp++, orig++) {
-          if (*cp != '\\')
-               continue;
-
-          switch (*++cp) {
-          case 'a': /* alert (bell) */
-               *orig = '\a';
-               continue;
-          case 'b': /* backspace */
-               *orig = '\b';
-               continue;
-          case 'e': /* escape */
-               *orig = '\e';
-               continue;
-          case 'f': /* formfeed */
-               *orig = '\f';
-               continue;
-          case 'n': /* newline */
-               *orig = '\n';
-               continue;
-          case 'r': /* carriage return */
-               *orig = '\r';
-               continue;
-          case 't': /* horizontal tab */
-               *orig = '\t';
-               continue;
-          case 'v': /* vertical tab */
-               *orig = '\v';
-               continue;
-          case '\\':     /* backslash */
-               *orig = '\\';
-               continue;
-          case '\'':     /* single quote */
-               *orig = '\'';
-               continue;
-          case '\"':     /* double quote */
-               *orig = '"';
-               continue;
-          case '0':
-          case '1':
-          case '2':
-          case '3': /* octal */
-          case '4':
-          case '5':
-          case '6':
-          case '7': /* number */
-               for (i = 0, c = 0;
-                    ISODIGIT((unsigned char)*cp) && i < 3;
-                    i++, cp++) {
-                    c <<= 3;
-                    c |= (*cp - '0');
-               }
-               *orig = c;
-               --cp;
-               continue;
-          case 'x': /* hexidecimal number */
-               cp++;     /* skip 'x' */
-               for (i = 0, c = 0;
-                    isxdigit((unsigned char)*cp) && i < 2;
-                    i++, cp++) {
-                    c <<= 4;
-                    if (isdigit((unsigned char)*cp))
-                         c |= (*cp - '0');
-                    else
-                         c |= ((toupper((unsigned char)*cp) -
-                             'A') + 10);
-               }
-               *orig = c;
-               --cp;
-               continue;
-          default:
-               --cp;
-               break;
-          }
-     }
-
-     return (new);
-}
-
-int g_pane_count;
-void i3_layout_construct( JsonBuilder* builder ) {
-     GError *err = NULL;
-     JsonParser *parser;
-
-     json_builder_begin_object( builder );
-     json_builder_set_member_name( builder, "type" );
-     json_builder_add_string_value( builder, "con" );
-
-     /* TODO: DO we always have the id? */
-     uint_t sx, sy, xoff, yoff;
-
-     if ( scanf( "%ux%u,%u,%u", &sx, &sy, &xoff, &yoff) != 4 )
-          return;
-
-     char wp_id[BUFSIZ];
-     char bufchar = fgetc(stdin);
-	if ( bufchar == ',') {
-          uint_t saved_val;
-          if ( scanf( "%u", &saved_val ) == 1 ) {
-               bufchar = fgetc(stdin);
-               if (bufchar == 'x') {
-                    ungetc('x', stdin);
-                    sprintf( wp_id, "%u", saved_val );
-                    int i;
-                    for( i = strlen(wp_id)-1; i >= 0; i-- ) {
-                         ungetc( wp_id[ i ], stdin );
-                    }
-                    wp_id[0] = '\0';
-               }
-               else {
-                    sprintf( wp_id, "pane%u", saved_val );
-                    ungetc( bufchar, stdin );
-               }
-          }
-	}
-     else {
-          ungetc( bufchar, stdin );
-     }
-     /* No need to validate the layout format string is correct for now */
-     /* TODO: Build a json representation of the equivalent i3 layout */
-     bufchar = fgetc(stdin);
-     switch (bufchar) {
-          case '\n':
-          case ',':
-          case '}':
-          case ']':
-               if ( wp_id[0] != '\0' ) {
-                    json_builder_set_member_name( builder, "mark" );
-                    json_builder_add_string_value( builder, wp_id );
-               }
-               json_builder_set_member_name( builder, "swallows" );
-               json_builder_begin_array( builder );
-               json_builder_begin_object( builder );
-               json_builder_set_member_name( builder, "class" );
-               json_builder_add_string_value( builder, "^Gnome\\-terminal$" );
-               json_builder_end_object( builder );
-               json_builder_end_array( builder );
-               
-               json_builder_end_object( builder );
-               ungetc(bufchar, stdin);
-               g_pane_count++;
-               return;
-          case '{':
-               json_builder_set_member_name( builder, "layout" );
-               json_builder_add_string_value( builder, "splith" );
-               json_builder_set_member_name( builder, "nodes" );
-               json_builder_begin_array( builder );
-               //lc->type = LAYOUT_LEFTRIGHT;
-               break;
-          case '[':
-               json_builder_set_member_name( builder, "layout" );
-               json_builder_add_string_value( builder, "splitv" );
-               json_builder_set_member_name( builder, "nodes" );
-               json_builder_begin_array( builder );
-               //lc->type = LAYOUT_TOPBOTTOM;
-               break;
-          default:
-               return;
-     }
-
-	do {
-		i3_layout_construct(builder);
-          bufchar = fgetc(stdin);
-	} while ( bufchar == ',');
-
-     switch (bufchar) {
-          case '}':
-          case ']':
-               json_builder_end_array( builder );
-               json_builder_end_object( builder );
-               return;
-          default:
-               return;
-     }
-
-     json_builder_end_object( builder );
-     return;
-}
 
 gint main() {
      i3ipcConnection *conn;
@@ -248,65 +61,60 @@ gint main() {
      /* END PRINT TO OTHER TERMINAL TEST */
 #endif
      while ( 1 ) {
-#if 1
-          if (scanf( "%%%s %%%d", tmux_cmd, &pane ) == 2) {
-               if ( !strcmp( tmux_cmd, "output" ) ) {
-                    fgets( buf, BUFSIZ, stdin); 
-                    //printf( "%s", buf);
-                    buf[(strlen(buf)-1)] = '\0';
-                    printf( "%s", unescape(buf));
-                    fflush(stdout);
-               }
-#else
-          if (scanf( "%%%s @%d", tmux_cmd, &workspace ) == 2 ) {
+          if (scanf( "%%%s ", tmux_cmd ) == 1 ) {
                /* REACHED LINE END */
-               if ( !strcmp( tmux_cmd, WINDOW_ADD_CMD ) ) {
-                    sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
-                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    //g_printf("Reply: %s\n", reply);
-                    g_free(reply);
+               if ( !strcmp( tmux_cmd, TMUX_WINDOW_ADD ) ) {
+                    if (scanf( "@%d", &workspace ) == 1 ) {
+                         sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
+                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                         //g_printf("Reply: %s\n", reply);
+                         g_free(reply);
+                    }
                }
-               if ( !strcmp( tmux_cmd, LAYOUT_CHANGE_CMD ) ) {
-                    /* Ignore checksum for now */
-                    char checksum[5];
-                    scanf( "%4s,", checksum );
+               else if ( !strcmp( tmux_cmd, "output" ) ) {
+                    if (scanf( "%%%d", &pane ) == 1) {
+                         fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
+                         fgets( buf, BUFSIZ, stdin); 
+                         //printf( "%s", buf);
+                         buf[(strlen(buf)-1)] = '\0';
+                         printf( "%s", unescape(buf));
+                         fflush(stdout);
+                    }
+               }
+               else if ( !strcmp( tmux_cmd, TMUX_LAYOUT_CHANGE ) ) {
+                    if (scanf( "@%d", &workspace ) == 1 ) {
+                         /* TODO: Do I need to remove the newline at the end of the layout string? */
+                         /* retrieve the entire layout string */
+                         fgets( buf, BUFSIZ, stdin);
+                         char* parse_str = buf;
+                         /* Ignore checksum for now */
+                         char checksum[5];
+                         sscanf( parse_str, "%4s,", checksum );
+                         parse_str += 6;
+                         
+                         gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
 
-                    /* TODO: MORE INTENSE LAYOUTS LATER */
-                    
-                    JsonBuilder* builder = json_builder_new();
-                    g_pane_count = 0;
-                    i3_layout_construct( builder );
-
-                    /* Generate a string from the JsonBuilder */
-                    JsonGenerator *gen = json_generator_new ();
-                    JsonNode * root = json_builder_get_root (builder);
-                    json_generator_set_root (gen, root);
-                    gchar *layout_str = json_generator_to_data (gen, NULL);
-
-                    json_node_free (root);
-                    g_object_unref (gen);
-                    g_object_unref (builder);
-
-                    char tmpfile[] = "/tmp/layout_XXXXXX";
-                    int layout_fd = mkstemp( tmpfile );
-                    fchmod( layout_fd, 0666 );
-                    dprintf( layout_fd, "%s", layout_str );
-                    close( layout_fd );
-                    sprintf( i3_cmd, "workspace %d, append_layout %s", workspace, tmpfile );
-                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    //g_printf("Reply: %s\n", reply);
-                    g_free(reply);
-                    /* Strategy move window to mark then kill the marked pane */
-                    //remove ( tmpfile );
-                    //sprintf( i3_cmd, "exec gnome-terminal" );
-                    /*while ( g_pane_count > 0 ) {
+                         char tmpfile[] = "/tmp/layout_XXXXXX";
+                         int layout_fd = mkstemp( tmpfile );
+                         fchmod( layout_fd, 0666 );
+                         dprintf( layout_fd, "%s", layout_str );
+                         printf( "layout is %s\n", layout_str);
+                         close( layout_fd );
+                         g_free( layout_str );
+                         sprintf( i3_cmd, "workspace %d, append_layout %s", workspace, tmpfile );
+                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                         //g_printf("Reply: %s\n", reply);
+                         g_free(reply);
+                         /* Strategy move window to mark then kill the marked pane */
+                         //remove ( tmpfile );
+                         //sprintf( i3_cmd, "exec gnome-terminal" );
+#if 0
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_printf("Reply: %s\n", reply);
                          g_free(reply);
-                         g_pane_count--;
-                    }*/
-               }
 #endif
+                    }
+               }
           }
           else {
 next_cmd:
