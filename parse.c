@@ -92,7 +92,7 @@ char * unescape(char *orig)
      return (new);
 }
 
-char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
+void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
      GError *err = NULL;
      JsonParser *parser;
 
@@ -105,55 +105,58 @@ char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
      uint_t wp_id = 0;
      char wp_id_str[64];
 
-     if (!isdigit((u_char) *tmux_layout)) {
-          printf( "BARF %s\n", tmux_layout);
-          return (NULL);
+     if (!isdigit((u_char) (**tmux_layout))) {
+          printf( "BARF %s\n", (*tmux_layout));
+          return;
      }
-     size_t n_scanned = sscanf(tmux_layout, "%ux%u,%u,%u,%u", &sx, &sy, &xoff, &yoff, &wp_id);
+     size_t n_scanned = sscanf((*tmux_layout), "%ux%u,%u,%u,%u", &sx, &sy, &xoff, &yoff, &wp_id);
      if ( n_scanned = 5 )
           sprintf( wp_id_str, "%u", wp_id );
      else if ( n_scanned == 4 )
           *wp_id_str = '\0';
      else {
           printf( "BLURGH\n");
-          return (NULL);
+          return;
      }
 
-     while (isdigit((u_char) *tmux_layout))
-          tmux_layout++;
-     if (*tmux_layout != 'x') {
+     while (isdigit((u_char) (**tmux_layout)))
+          (*tmux_layout)++;
+     if ((**tmux_layout) != 'x') {
           printf( "AAGH\n");
-          return (NULL);
+          return;
      }
-     tmux_layout++;
-     while (isdigit((u_char) *tmux_layout))
-          tmux_layout++;
-     if (*tmux_layout != ',') {
+     (*tmux_layout)++;
+     while (isdigit((u_char) (**tmux_layout)))
+          (*tmux_layout)++;
+     if ((**tmux_layout) != ',') {
           printf( "OOOF\n");
-          return (NULL);
+          return;
      }
-     tmux_layout++;
-     while (isdigit((u_char) *tmux_layout))
-          tmux_layout++;
-     if (*tmux_layout != ',') {
+     (*tmux_layout)++;
+     while (isdigit((u_char) (**tmux_layout)))
+          (*tmux_layout)++;
+     if ((**tmux_layout) != ',') {
           printf( "OUCH\n");
-          return (NULL);
+          return;
      }
-     tmux_layout++;
-     while (isdigit((u_char) *tmux_layout))
-          tmux_layout++;
-     if (*tmux_layout == ',') {
-          char* saved = tmux_layout;
-          tmux_layout++;
-          while (isdigit((u_char) *tmux_layout))
-               tmux_layout++;
-          if (*tmux_layout == 'x')
-               tmux_layout = saved;
+     (*tmux_layout)++;
+     while (isdigit((u_char) (**tmux_layout)))
+          (*tmux_layout)++;
+     if ((**tmux_layout) == ',') {
+          /* TODO: Does the saved go before or after the increment? */
+          char* saved = (*tmux_layout);
+          (*tmux_layout)++;
+          while (isdigit((u_char) (**tmux_layout)))
+               (*tmux_layout)++;
+          if ((**tmux_layout) == 'x') {
+               *wp_id_str = '\0';
+               (*tmux_layout) = saved;
+          }
      }
 
-     /* No need to validate the tmux_layout format string is correct for now */
+     /* No need to validate the (*tmux_layout) format string is correct for now */
      /* TODO: Build a json representation of the equivalent i3 layout */
-     switch (*tmux_layout) {
+     switch (**tmux_layout) {
           case '\0':
           case '\n':
           case ',':
@@ -172,7 +175,7 @@ char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
                json_builder_end_array( builder );
                
                json_builder_end_object( builder );
-               tmux_layout++;
+               //(*tmux_layout)++;
                return;
           case '{':
                json_builder_set_member_name( builder, "layout" );
@@ -180,7 +183,6 @@ char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
                json_builder_set_member_name( builder, "nodes" );
                json_builder_begin_array( builder );
                //lc->type = LAYOUT_LEFTRIGHT;
-               tmux_layout++;
                break;
           case '[':
                json_builder_set_member_name( builder, "layout" );
@@ -188,19 +190,17 @@ char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
                json_builder_set_member_name( builder, "nodes" );
                json_builder_begin_array( builder );
                //lc->type = LAYOUT_TOPBOTTOM;
-               tmux_layout++;
                break;
           default:
-               tmux_layout++;
                return;
      }
 
 	do {
+          (*tmux_layout)++;
 		tmux_layout_to_i3_layout_impl( tmux_layout, builder );
-          tmux_layout++;
-	} while ( *tmux_layout == ',');
+	} while ( **tmux_layout == ',');
 
-     switch (*tmux_layout) {
+     switch (**tmux_layout) {
           case '}':
           case ']':
                json_builder_end_array( builder );
@@ -216,7 +216,7 @@ char* tmux_layout_to_i3_layout_impl( char* tmux_layout, JsonBuilder* builder ) {
 
 gchar* tmux_layout_to_i3_layout( char* tmux_layout ) {
      JsonBuilder* builder = json_builder_new();
-     tmux_layout_to_i3_layout_impl( tmux_layout, builder );
+     tmux_layout_to_i3_layout_impl( &tmux_layout, builder );
 
      /* Generate a string from the JsonBuilder */
      JsonGenerator *gen = json_generator_new ();
