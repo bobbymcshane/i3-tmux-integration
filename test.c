@@ -98,7 +98,6 @@ gint main() {
                          int layout_fd = mkstemp( tmpfile );
                          fchmod( layout_fd, 0666 );
                          dprintf( layout_fd, "%s", layout_str );
-                         printf( "layout is %s\n", layout_str);
                          close( layout_fd );
                          g_free( layout_str );
                          sprintf( i3_cmd, "workspace %d, append_layout %s", workspace, tmpfile );

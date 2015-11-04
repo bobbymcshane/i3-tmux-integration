@@ -106,7 +106,6 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
      char wp_id_str[64];
 
      if (!isdigit((u_char) (**tmux_layout))) {
-          printf( "BARF %s\n", (*tmux_layout));
           return;
      }
      size_t n_scanned = sscanf((*tmux_layout), "%ux%u,%u,%u,%u", &sx, &sy, &xoff, &yoff, &wp_id);
@@ -115,28 +114,24 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
      else if ( n_scanned == 4 )
           *wp_id_str = '\0';
      else {
-          printf( "BLURGH\n");
           return;
      }
 
      while (isdigit((u_char) (**tmux_layout)))
           (*tmux_layout)++;
      if ((**tmux_layout) != 'x') {
-          printf( "AAGH\n");
           return;
      }
      (*tmux_layout)++;
      while (isdigit((u_char) (**tmux_layout)))
           (*tmux_layout)++;
      if ((**tmux_layout) != ',') {
-          printf( "OOOF\n");
           return;
      }
      (*tmux_layout)++;
      while (isdigit((u_char) (**tmux_layout)))
           (*tmux_layout)++;
      if ((**tmux_layout) != ',') {
-          printf( "OUCH\n");
           return;
      }
      (*tmux_layout)++;
