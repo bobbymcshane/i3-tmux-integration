@@ -50,9 +50,9 @@ gint main() {
      pane_io_settings.c_lflag &= ~(ICANON | ECHO);
      pane_io_settings.c_cc[VTIME]=0;
      pane_io_settings.c_cc[VMIN]=1;
-     pid_t i, i2;
+     pid_t i;
      char buf2[10];
-     int fds, fdm, status, status2;
+     int fds, fdm, status;
      
 
      /* Open a new unused tty */
@@ -74,19 +74,11 @@ gint main() {
           //printf("Where do I pop up - 2?\n");
           waitpid(i, &status, 0);
      } else {  // child
-          i2 = fork();
-          if ( i2 == 0 ) {
-               /* Spawn a urxvt terminal which looks at the specified pty */
-               sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
-               //printf("%s\n",buf2);
-               system(buf2);
-               waitpid(i2, &status2, 0);
-          }
-          else {
-               /* Spawn tmux NOTE: I'll probably want to do this some other way */
-               system("tmux -C");
-               exit(0);
-          }
+          /* Spawn a urxvt terminal which looks at the specified pty */
+          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+          printf("%s\n",buf2);
+          system(buf2);
+          exit(0);
      }
      /* END PRINT TO OTHER TERMINAL TEST */
 #endif
