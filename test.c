@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <glib/gprintf.h>
@@ -9,6 +10,11 @@
 #include "tmux_commands.h"
 #include "parse.h"
 #include <string.h>
+#include <strings.h>
+#include <pty.h>
+#include <termios.h>
+#include <unistd.h>
+#include <errno.h>
 
 typedef unsigned int uint_t;
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
@@ -19,43 +25,49 @@ gint main() {
 
      conn = i3ipc_connection_new(NULL, NULL);
      char buf[BUFSIZ];
+     char output_buf[BUFSIZ];
      char tmux_cmd[BUFSIZ];
      char i3_cmd[BUFSIZ];
      char bufchar;
      char endc;
      int workspace, n_scanned, pane;
 
+     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
+#if 1
+     struct termios pane_io_settings;
+     bzero( &pane_io_settings, sizeof( pane_io_settings));
+
+     /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
+          printf("Error getting current terminal settings, %s\n", strerror(errno));
+          return -1;
+     }*/
+
+     /* We want to disable the canonical mode */
+     //pane_io_settings.c_lflag &= ~ICANON;
+     //pane_io_settings.c_lflag |= ECHO; /* TODO: AM I SURE I WANT THIS? */
+     pane_io_settings.c_cc[VTIME]=0;
+     pane_io_settings.c_cc[VMIN]=1;
      pid_t i;
+     char buf2[10];
      int fds, fdm, status;
 
-     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
-#if 0
-
      /* Open a new unused tty */
-     fdm = posix_openpt(O_RDWR);
-     grantpt(fdm);
-     unlockpt(fdm);
+     openpty( &fdm, &fds, NULL, &pane_io_settings, NULL );
+     //grantpt(fdm);
+     //unlockpt(fdm);
 
-     printf("pts/%s\n", ptsname(fdm));
-     //close(0); /* Don't close stdin */
-     close(1);
-     close(2);
+     printf("%s\n", ptsname(fdm));
 
      i = fork();
      if ( i == 0 ) { // parent
-          dup(fdm);
-          dup(fdm);
-          dup(fdm);
-          //waitpid(i, &status, 0);
+          //dprintf(fdm,"Where do I pop up?\n");
+          //printf("Where do I pop up - 2?\n");
+          waitpid(i, &status, 0);
      } else {  // child
-          fds = open(ptsname(fdm), O_RDWR);
-          dup(fds);
-          dup(fds);
-          dup(fds);
-          strcpy(buf, (ptsname(fdm)));
           /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf, "urxvt -pty-fd %c/2", basename(buf));
-          system(buf);
+          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+          printf("%s\n",buf2);
+          system(buf2);
           exit(0);
      }
      /* END PRINT TO OTHER TERMINAL TEST */
@@ -77,8 +89,10 @@ gint main() {
                          fgets( buf, BUFSIZ, stdin); 
                          //printf( "%s", buf);
                          buf[(strlen(buf)-1)] = '\0';
-                         printf( "%s", unescape(buf));
-                         fflush(stdout);
+                         int out_len = sprintf( output_buf, "%s", unescape(buf));
+                         //fflush(stdout);
+                         write( fdm, output_buf, out_len );
+                         fsync( fdm );
                     }
                }
                else if ( !strcmp( tmux_cmd, TMUX_LAYOUT_CHANGE ) ) {

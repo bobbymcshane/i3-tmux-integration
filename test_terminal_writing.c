@@ -37,7 +37,7 @@ int main() {
           dup(fds);
           strcpy(buf, ptsname(fdm));
           /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf, "urxvt -pty-fd %c/2", basename(buf));
+          sprintf(buf, "urxvt -pty-fd %c", basename(buf));
           system(buf);
           exit(0);
      }
