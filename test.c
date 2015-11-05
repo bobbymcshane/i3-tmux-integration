@@ -16,15 +16,18 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/select.h>
+#include <pthread.h>
 
 typedef unsigned int uint_t;
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
 
-gint main() {
-     i3ipcConnection *conn;
-     gchar *reply = NULL;
+/* ALL THESE GLOBALS WILL BE FIXED UP */
+int fdm; /* Global for now, but not for long probably... */
+i3ipcConnection *conn;
+gchar *reply = NULL;
 
-     conn = i3ipc_connection_new(NULL, NULL);
+/* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
+void* tmux_read_init( void* tmux_read_args ) {
      char buf[BUFSIZ];
      char output_buf[BUFSIZ];
      char input_buf[BUFSIZ];
@@ -33,56 +36,7 @@ gint main() {
      char bufchar;
      char endc;
      int workspace, n_scanned, pane;
-
-     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
-#if 1
-     struct termios pane_io_settings;
-     bzero( &pane_io_settings, sizeof( pane_io_settings));
-
-     /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
-          printf("Error getting current terminal settings, %s\n", strerror(errno));
-          return -1;
-     }*/
-
-     /* We want to disable the canonical mode */
-     //pane_io_settings.c_lflag &= ~ICANON;
-     //pane_io_settings.c_lflag |= ECHO; /* TODO: AM I SURE I WANT THIS? */
-     pane_io_settings.c_lflag &= ~(ICANON | ECHO);
-     pane_io_settings.c_cc[VTIME]=0;
-     pane_io_settings.c_cc[VMIN]=1;
-     pid_t i;
-     char buf2[10];
-     int fds, fdm, status;
-     
-
-     /* Open a new unused tty */
-     openpty( &fdm, &fds, NULL, &pane_io_settings, NULL );
-
-     // Save the existing flags
-     int saved_flags = fcntl(fdm, F_GETFL);
-     // Set the new flags with O_NONBLOCK
-     fcntl(fdm, F_SETFL, saved_flags | O_NONBLOCK );
-
-     //grantpt(fdm);
-     //unlockpt(fdm);
-
-     //printf("%s\n", ptsname(fdm));
-
-     i = fork();
-     if ( i == 0 ) { // parent
-          //dprintf(fdm,"Where do I pop up?\n");
-          //printf("Where do I pop up - 2?\n");
-          waitpid(i, &status, 0);
-     } else {  // child
-          /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
-          printf("%s\n",buf2);
-          system(buf2);
-          exit(0);
-     }
-     /* END PRINT TO OTHER TERMINAL TEST */
-#endif
-     while ( 1 ) {
+     while( 1 ) {
           if (scanf( "%%%s ", tmux_cmd ) == 1 ) {
                /* REACHED LINE END */
                if ( !strcmp( tmux_cmd, TMUX_WINDOW_ADD ) ) {
@@ -151,15 +105,63 @@ next_cmd:
           else
                ungetc( bufchar, stdin );
 
-          /* Check if the slave tty received any input */
-          char in_buffer[BUFSIZ];
-          ssize_t size = read(fdm, &in_buffer, sizeof(in_buffer));
-          if ( size > 0 ) {
-               /* WE HAVE DATA */
-               in_buffer[size]='\0';
-               printf("send-keys %s\n", in_buffer);
-               fflush(stdout);
-          }
+     }
+}
+
+gint main() {
+     pthread_t tmux_read_thread;
+
+     conn = i3ipc_connection_new(NULL, NULL);
+
+     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
+     struct termios pane_io_settings;
+     bzero( &pane_io_settings, sizeof( pane_io_settings));
+
+     /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
+          printf("Error getting current terminal settings, %s\n", strerror(errno));
+          return -1;
+     }*/
+
+     /* We want to disable the canonical mode */
+     //pane_io_settings.c_lflag &= ~ICANON;
+     //pane_io_settings.c_lflag |= ECHO; /* TODO: AM I SURE I WANT THIS? */
+     pane_io_settings.c_lflag &= ~(ICANON | ECHO);
+     pane_io_settings.c_cc[VTIME]=0;
+     pane_io_settings.c_cc[VMIN]=1;
+     pid_t i;
+     char buf2[10];
+     int fds, status;
+     
+
+     /* Open a new unused tty */
+     openpty( &fdm, &fds, NULL, &pane_io_settings, NULL );
+
+     // Save the existing flags
+     int saved_flags = fcntl(fdm, F_GETFL);
+     // Set the new flags with O_NONBLOCK
+     fcntl(fdm, F_SETFL, saved_flags | O_NONBLOCK );
+
+     //grantpt(fdm);
+     //unlockpt(fdm);
+
+     //printf("%s\n", ptsname(fdm));
+
+     i = fork();
+     if ( i == 0 ) { // parent
+          //dprintf(fdm,"Where do I pop up?\n");
+          //printf("Where do I pop up - 2?\n");
+          waitpid(i, &status, 0);
+     } else {  // child
+          /* Spawn a urxvt terminal which looks at the specified pty */
+          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+          printf("%s\n",buf2);
+          system(buf2);
+          exit(0);
+     }
+
+     pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
+
+     while ( 1 ) {
 #if 0
           fd_set rfds;
           struct timeval tv;
@@ -185,7 +187,18 @@ next_cmd:
                printf("No data within five seconds.\n");
 #endif
 
+          /* Check if the slave tty received any input */
+          char in_buffer[BUFSIZ];
+          ssize_t size = read(fdm, &in_buffer, sizeof(in_buffer));
+          if ( size > 0 ) {
+               /* WE HAVE DATA */
+               in_buffer[size]='\0';
+               printf("send-keys \"%s\"\n", in_buffer);
+               fflush(stdout);
+          }
      }
+
+     pthread_cancel( tmux_read_thread );
 
      g_object_unref(conn);
 
