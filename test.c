@@ -15,6 +15,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/select.h>
 
 typedef unsigned int uint_t;
 #define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
@@ -26,6 +27,7 @@ gint main() {
      conn = i3ipc_connection_new(NULL, NULL);
      char buf[BUFSIZ];
      char output_buf[BUFSIZ];
+     char input_buf[BUFSIZ];
      char tmux_cmd[BUFSIZ];
      char i3_cmd[BUFSIZ];
      char bufchar;
@@ -45,18 +47,26 @@ gint main() {
      /* We want to disable the canonical mode */
      //pane_io_settings.c_lflag &= ~ICANON;
      //pane_io_settings.c_lflag |= ECHO; /* TODO: AM I SURE I WANT THIS? */
+     pane_io_settings.c_lflag &= ~(ICANON | ECHO);
      pane_io_settings.c_cc[VTIME]=0;
      pane_io_settings.c_cc[VMIN]=1;
-     pid_t i;
+     pid_t i, i2;
      char buf2[10];
-     int fds, fdm, status;
+     int fds, fdm, status, status2;
+     
 
      /* Open a new unused tty */
      openpty( &fdm, &fds, NULL, &pane_io_settings, NULL );
+
+     // Save the existing flags
+     int saved_flags = fcntl(fdm, F_GETFL);
+     // Set the new flags with O_NONBLOCK
+     fcntl(fdm, F_SETFL, saved_flags | O_NONBLOCK );
+
      //grantpt(fdm);
      //unlockpt(fdm);
 
-     printf("%s\n", ptsname(fdm));
+     //printf("%s\n", ptsname(fdm));
 
      i = fork();
      if ( i == 0 ) { // parent
@@ -64,11 +74,19 @@ gint main() {
           //printf("Where do I pop up - 2?\n");
           waitpid(i, &status, 0);
      } else {  // child
-          /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
-          printf("%s\n",buf2);
-          system(buf2);
-          exit(0);
+          i2 = fork();
+          if ( i2 == 0 ) {
+               /* Spawn a urxvt terminal which looks at the specified pty */
+               sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+               //printf("%s\n",buf2);
+               system(buf2);
+               waitpid(i2, &status2, 0);
+          }
+          else {
+               /* Spawn tmux NOTE: I'll probably want to do this some other way */
+               system("tmux -C");
+               exit(0);
+          }
      }
      /* END PRINT TO OTHER TERMINAL TEST */
 #endif
@@ -140,6 +158,41 @@ next_cmd:
                return 0;
           else
                ungetc( bufchar, stdin );
+
+          /* Check if the slave tty received any input */
+          char in_buffer[BUFSIZ];
+          ssize_t size = read(fdm, &in_buffer, sizeof(in_buffer));
+          if ( size > 0 ) {
+               /* WE HAVE DATA */
+               in_buffer[size]='\0';
+               printf("send-keys %s\n", in_buffer);
+               fflush(stdout);
+          }
+#if 0
+          fd_set rfds;
+          struct timeval tv;
+          int retval;
+
+          /* Watch stdin on the slave (fdm) to see when it has input. */
+          FD_ZERO(&rfds);
+          FD_SET(fdm, &rfds);
+
+          /* Wait up to five seconds. */
+          tv.tv_sec = 5;
+          tv.tv_usec = 0;
+
+          retval = select(1, &rfds, NULL, NULL, &tv);
+          /* Don't rely on the value of tv now! */
+
+          if (retval == -1)
+               perror("select()");
+          else if (retval)
+               printf("Data is available now.\n");
+          /* FD_ISSET(0, &rfds) will be true. */
+          else
+               printf("No data within five seconds.\n");
+#endif
+
      }
 
      g_object_unref(conn);
