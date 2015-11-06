@@ -19,12 +19,46 @@
 #include <pthread.h>
 
 typedef unsigned int uint_t;
-#define I3_WORKSPACE_ADD_CMD "workspace %d, exec gnome-terminal"
+#define I3_WORKSPACE_ADD_CMD "workspace %d"
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
-int fdm; /* Global for now, but not for long probably... */
 i3ipcConnection *conn;
 gchar *reply = NULL;
+struct termios pane_io_settings;
+volatile int n_tmux_panes = 0;
+int pane_fds[ 64 ]; /* Cap at 64 for now */
+int* pane_fd_ptrs[ 64 ]; /* Cap at 64 for now */
+
+void spawn_tmux_pane( int** pane_fd_ptr ) {
+     pid_t i;
+     int fds, status;
+     char buf2[10];
+
+     /* Open a new unused tty */
+     openpty( &pane_fds[n_tmux_panes], &fds, NULL, &pane_io_settings, NULL );
+
+     // Save the existing flags
+     int saved_flags = fcntl(pane_fds[n_tmux_panes], F_GETFL);
+     // Set the new flags with O_NONBLOCK
+
+     fcntl(pane_fds[n_tmux_panes], F_SETFL, saved_flags | O_NONBLOCK );
+
+     *pane_fd_ptr = &pane_fds[n_tmux_panes];
+     n_tmux_panes++;
+     printf("INCREMENTED %d\n", n_tmux_panes);
+     i = fork();
+     if ( i == 0 ) { // parent
+          //dprintf(fdm,"Where do I pop up?\n");
+          //printf("Where do I pop up - 2?\n");
+          waitpid(i, &status, 0);
+     } else {  // child
+          /* Spawn a urxvt terminal which looks at the specified pty */
+          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+          printf("%s\n",buf2);
+          system(buf2);
+          exit(0);
+     }
+}
 
 /* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
 void* tmux_read_init( void* tmux_read_args ) {
@@ -49,14 +83,17 @@ void* tmux_read_init( void* tmux_read_args ) {
                }
                else if ( !strcmp( tmux_cmd, "output" ) ) {
                     if (scanf( "%%%d", &pane ) == 1) {
+                         if ( !pane_fd_ptrs[ pane ] ) {
+                              spawn_tmux_pane( &pane_fd_ptrs[ pane ] );
+                         }
                          fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
                          fgets( buf, BUFSIZ, stdin); 
                          //printf( "%s", buf);
                          buf[(strlen(buf)-1)] = '\0';
                          int out_len = sprintf( output_buf, "%s", unescape(buf));
                          //fflush(stdout);
-                         write( fdm, output_buf, out_len );
-                         fsync( fdm );
+                         write( *pane_fd_ptrs[ pane ], output_buf, out_len );
+                         fsync( *pane_fd_ptrs[ pane ] );
                     }
                }
                else if ( !strcmp( tmux_cmd, TMUX_LAYOUT_CHANGE ) ) {
@@ -109,12 +146,12 @@ next_cmd:
 }
 
 gint main() {
+     bzero ( pane_fd_ptrs, sizeof ( pane_fd_ptrs ) );
      pthread_t tmux_read_thread;
 
      conn = i3ipc_connection_new(NULL, NULL);
 
      /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
-     struct termios pane_io_settings;
      bzero( &pane_io_settings, sizeof( pane_io_settings));
 
      /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
@@ -128,73 +165,26 @@ gint main() {
      pane_io_settings.c_lflag &= ~(ICANON | ECHO);
      pane_io_settings.c_cc[VTIME]=0;
      pane_io_settings.c_cc[VMIN]=1;
-     pid_t i;
-     char buf2[10];
-     int fds, status;
-     
-
-     /* Open a new unused tty */
-     openpty( &fdm, &fds, NULL, &pane_io_settings, NULL );
-
-     // Save the existing flags
-     int saved_flags = fcntl(fdm, F_GETFL);
-     // Set the new flags with O_NONBLOCK
-     fcntl(fdm, F_SETFL, saved_flags | O_NONBLOCK );
 
      //grantpt(fdm);
      //unlockpt(fdm);
 
      //printf("%s\n", ptsname(fdm));
 
-     i = fork();
-     if ( i == 0 ) { // parent
-          //dprintf(fdm,"Where do I pop up?\n");
-          //printf("Where do I pop up - 2?\n");
-          waitpid(i, &status, 0);
-     } else {  // child
-          /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
-          printf("%s\n",buf2);
-          system(buf2);
-          exit(0);
-     }
-
      pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
 
      while ( 1 ) {
-#if 0
-          fd_set rfds;
-          struct timeval tv;
-          int retval;
-
-          /* Watch stdin on the slave (fdm) to see when it has input. */
-          FD_ZERO(&rfds);
-          FD_SET(fdm, &rfds);
-
-          /* Wait up to five seconds. */
-          tv.tv_sec = 5;
-          tv.tv_usec = 0;
-
-          retval = select(1, &rfds, NULL, NULL, &tv);
-          /* Don't rely on the value of tv now! */
-
-          if (retval == -1)
-               perror("select()");
-          else if (retval)
-               printf("Data is available now.\n");
-          /* FD_ISSET(0, &rfds) will be true. */
-          else
-               printf("No data within five seconds.\n");
-#endif
-
           /* Check if the slave tty received any input */
-          char in_buffer[BUFSIZ];
-          ssize_t size = read(fdm, &in_buffer, sizeof(in_buffer));
-          if ( size > 0 ) {
-               /* WE HAVE DATA */
-               in_buffer[size]='\0';
-               printf("send-keys \"%s\"\n", in_buffer);
-               fflush(stdout);
+          int pane_ix;
+          for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
+               char in_buffer[BUFSIZ];
+               ssize_t size = read(pane_fds[pane_ix], &in_buffer, sizeof(in_buffer));
+               if ( size > 0 ) {
+                    /* WE HAVE DATA */
+                    in_buffer[size]='\0';
+                    printf("send-keys \"%s\"\n", in_buffer);
+                    fflush(stdout);
+               }
           }
      }
 

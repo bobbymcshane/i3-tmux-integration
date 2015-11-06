@@ -164,8 +164,8 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
                json_builder_set_member_name( builder, "swallows" );
                json_builder_begin_array( builder );
                json_builder_begin_object( builder );
-               json_builder_set_member_name( builder, "class" );
-               json_builder_add_string_value( builder, "^Gnome\\-terminal$" );
+               //json_builder_set_member_name( builder, "class" );
+               //json_builder_add_string_value( builder, "^URxvt$" );
                json_builder_end_object( builder );
                json_builder_end_array( builder );
                
