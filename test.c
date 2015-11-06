@@ -26,38 +26,43 @@ i3ipcConnection *conn;
 gchar *reply = NULL;
 struct termios pane_io_settings;
 volatile int n_tmux_panes = 0;
-int pane_fds[ 64 ]; /* Cap at 64 for now */
-int* pane_fd_ptrs[ 64 ]; /* Cap at 64 for now */
+typedef struct {
+     int fd;
+     int pane_number;
+} TmuxPaneInfo_t;
+TmuxPaneInfo_t pane_infos[ 64 ]; /* Cap at 64 for now */
+TmuxPaneInfo_t* pane_info_ptrs[ 64 ]; /* Cap at 64 for now */
 
-void spawn_tmux_pane( int** pane_fd_ptr ) {
+void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      pid_t i;
      int fds, status;
      char buf2[10];
 
      /* Open a new unused tty */
-     openpty( &pane_fds[n_tmux_panes], &fds, NULL, &pane_io_settings, NULL );
+     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
 
      // Save the existing flags
-     int saved_flags = fcntl(pane_fds[n_tmux_panes], F_GETFL);
+     int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
      // Set the new flags with O_NONBLOCK
 
-     fcntl(pane_fds[n_tmux_panes], F_SETFL, saved_flags | O_NONBLOCK );
+     fcntl(pane_infos[n_tmux_panes].fd, F_SETFL, saved_flags | O_NONBLOCK );
 
-     *pane_fd_ptr = &pane_fds[n_tmux_panes];
-     n_tmux_panes++;
-     printf("INCREMENTED %d\n", n_tmux_panes);
+     *pane_info_ptr = &pane_infos[n_tmux_panes];
+     pane_infos[n_tmux_panes].pane_number = tmux_pane_number;
      i = fork();
-     if ( i == 0 ) { // parent
-          //dprintf(fdm,"Where do I pop up?\n");
-          //printf("Where do I pop up - 2?\n");
-          waitpid(i, &status, 0);
-     } else {  // child
+     if ( i == 0 ) { // child
           /* Spawn a urxvt terminal which looks at the specified pty */
           sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
           printf("%s\n",buf2);
           system(buf2);
           exit(0);
+     } else {  // parent
+          //dprintf(fdm,"Where do I pop up?\n");
+          //printf("Where do I pop up - 2?\n");
+          //waitpid(i, &status, 0); /* TODO: Do I need to do something with waitpid?
      }
+
+     n_tmux_panes++;
 }
 
 /* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
@@ -83,8 +88,8 @@ void* tmux_read_init( void* tmux_read_args ) {
                }
                else if ( !strcmp( tmux_cmd, "output" ) ) {
                     if (scanf( "%%%d", &pane ) == 1) {
-                         if ( !pane_fd_ptrs[ pane ] ) {
-                              spawn_tmux_pane( &pane_fd_ptrs[ pane ] );
+                         if ( !pane_info_ptrs[ pane ] ) {
+                              spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
                          }
                          fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
                          fgets( buf, BUFSIZ, stdin); 
@@ -92,8 +97,8 @@ void* tmux_read_init( void* tmux_read_args ) {
                          buf[(strlen(buf)-1)] = '\0';
                          int out_len = sprintf( output_buf, "%s", unescape(buf));
                          //fflush(stdout);
-                         write( *pane_fd_ptrs[ pane ], output_buf, out_len );
-                         fsync( *pane_fd_ptrs[ pane ] );
+                         write( pane_info_ptrs[ pane ]->fd, output_buf, out_len );
+                         fsync( pane_info_ptrs[ pane ]->fd );
                     }
                }
                else if ( !strcmp( tmux_cmd, TMUX_LAYOUT_CHANGE ) ) {
@@ -146,7 +151,7 @@ next_cmd:
 }
 
 gint main() {
-     bzero ( pane_fd_ptrs, sizeof ( pane_fd_ptrs ) );
+     bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
      pthread_t tmux_read_thread;
 
      conn = i3ipc_connection_new(NULL, NULL);
@@ -178,11 +183,11 @@ gint main() {
           int pane_ix;
           for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
                char in_buffer[BUFSIZ];
-               ssize_t size = read(pane_fds[pane_ix], &in_buffer, sizeof(in_buffer));
+               ssize_t size = read(pane_infos[pane_ix].fd, &in_buffer, sizeof(in_buffer));
                if ( size > 0 ) {
                     /* WE HAVE DATA */
                     in_buffer[size]='\0';
-                    printf("send-keys \"%s\"\n", in_buffer);
+                    printf("send-keys -t %d \"%s\"\n", pane_infos[pane_ix].pane_number, in_buffer);
                     fflush(stdout);
                }
           }
