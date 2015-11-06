@@ -53,7 +53,6 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      if ( i == 0 ) { // child
           /* Spawn a urxvt terminal which looks at the specified pty */
           sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
-          printf("%s\n",buf2);
           system(buf2);
           exit(0);
      } else {  // parent
@@ -111,7 +110,8 @@ void* tmux_read_init( void* tmux_read_args ) {
                          char checksum[5];
                          sscanf( parse_str, "%4s,", checksum );
                          parse_str += 6;
-                         
+
+                         /* Maybe this method should also build a command string to launch panes/move panes to marks */
                          gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
 
                          char tmpfile[] = "/tmp/layout_XXXXXX";
@@ -120,9 +120,8 @@ void* tmux_read_init( void* tmux_read_args ) {
                          dprintf( layout_fd, "%s", layout_str );
                          close( layout_fd );
                          g_free( layout_str );
-                         sprintf( i3_cmd, "workspace %d, append_layout %s", workspace, tmpfile );
+                         sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"%d tmux\"", "tmp_workspace", tmpfile, workspace );
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                         //g_printf("Reply: %s\n", reply);
                          g_free(reply);
                          /* Strategy move window to mark then kill the marked pane */
                          //remove ( tmpfile );
@@ -136,7 +135,6 @@ void* tmux_read_init( void* tmux_read_args ) {
                }
           }
           else {
-next_cmd:
                /* Seek to end of line */
                fgets( buf, BUFSIZ, stdin); 
                //printf("%s", buf);
