@@ -110,7 +110,7 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
      }
      size_t n_scanned = sscanf((*tmux_layout), "%ux%u,%u,%u,%u", &sx, &sy, &xoff, &yoff, &wp_id);
      if ( n_scanned = 5 )
-          sprintf( wp_id_str, "%u", wp_id );
+          sprintf( wp_id_str, "pane_container%u", wp_id );
      else if ( n_scanned == 4 )
           *wp_id_str = '\0';
      else {

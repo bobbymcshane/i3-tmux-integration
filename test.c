@@ -1,3 +1,11 @@
+/* TODO: I think I should change my approach.
+ * When a new window is created, react by sending a command to list the panes
+ * for that window and then make my new pane based on the result of that
+ * command.
+ *
+ * I need to start keeping track of which session I am in.
+ */
+
 #define _XOPEN_SOURCE
 #include <stdio.h>
 #include <string.h>
@@ -19,7 +27,28 @@
 #include <pthread.h>
 
 typedef unsigned int uint_t;
-#define I3_WORKSPACE_ADD_CMD "workspace %d"
+#define I3_WORKSPACE_ADD_CMD "workspace tmux %d"
+
+#define TMUX_CONTROL_CMD_RX_BEGIN "%%begin %u %u %u"
+#define TMUX_CONTROL_CMD_RX_END "%%end %u %u %u"
+
+/* LIST_SESSIONS_RX:
+<session_name>: <#> windows (created <date/time>) [WxH] (attached)
+0: 1 windows (created Fri Nov  6 16:42:43 2015) [80x24] (attached) */
+/* TODO: Can I use wildcards with scanf? */
+#define TMUX_CONTROL_CMD_RX_LIST_SESSIONS "%[^:]: %u windows (created %*[^)]) [%ux%u] (attached)"
+
+/* LIST_WINDOWS_RX:
+<session_name>: <window_name> (<#> panes) [WxH] [layout <layout_str>] @<window_id> (active)
+0: zsh* (1 panes) [80x24] [layout b260,80x24,0,0,3] @3 (active) */
+/* TODO: Does that grab the layout string correctly if the string contains a right bracket */
+#define TMUX_CONTROL_CMD_RX_LIST_WINDOWS "%[^:]: %*[^(] (%u panes) [%ux%u] [layout %[^]] @%u (active)"
+
+/* LIST_PANES_RX:
+<window_name>: [WxH] [history unsure/unsure, unsure bytes] %<pane_ix> (active)
+0: [80x24] [history 0/2000, 0 bytes] %3 (active) */
+/* TODO: later decide if certain inputs are useful */
+#define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u"
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
 i3ipcConnection *conn;
@@ -52,7 +81,7 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      i = fork();
      if ( i == 0 ) { // child
           /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf2, "/usr/bin/urxvt -pty-fd %d", fds);
+          sprintf(buf2, "/usr/bin/urxvt -title pane%d -pty-fd %d", tmux_pane_number, fds);
           system(buf2);
           exit(0);
      } else {  // parent
@@ -88,7 +117,12 @@ void* tmux_read_init( void* tmux_read_args ) {
                else if ( !strcmp( tmux_cmd, "output" ) ) {
                     if (scanf( "%%%d", &pane ) == 1) {
                          if ( !pane_info_ptrs[ pane ] ) {
+                              /* I probably don't want to spawn my panes here... */
                               spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
+                              /* Select the newly spawned urxvt window by its title */
+                              sprintf( i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
+                              reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                              g_free(reply);
                          }
                          fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
                          fgets( buf, BUFSIZ, stdin); 
@@ -120,7 +154,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                          dprintf( layout_fd, "%s", layout_str );
                          close( layout_fd );
                          g_free( layout_str );
-                         sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"%d tmux\"", "tmp_workspace", tmpfile, workspace );
+                         sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_free(reply);
                          /* Strategy move window to mark then kill the marked pane */
@@ -185,6 +219,7 @@ gint main() {
                if ( size > 0 ) {
                     /* WE HAVE DATA */
                     in_buffer[size]='\0';
+                    /* TODO: I might want to listen for control keys here or something... */
                     printf("send-keys -t %d \"%s\"\n", pane_infos[pane_ix].pane_number, in_buffer);
                     fflush(stdout);
                }
