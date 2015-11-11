@@ -7,7 +7,7 @@
  */
 
 #define _XOPEN_SOURCE
-#ifdef USE_I3
+#ifndef __APPLE__
 #include <i3ipc-glib/i3ipc-glib.h>
 #endif
 #include <stdio.h>
@@ -21,7 +21,7 @@
 #include "parse.h"
 #include <string.h>
 #include <strings.h>
-#ifdef USE_I3
+#ifndef __APPLE__
 #include <pty.h>
 #else
 #include <util.h>
@@ -57,7 +57,7 @@ typedef unsigned int uint_t;
 #define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u"
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
-#ifdef USE_I3
+#ifndef __APPLE__
 i3ipcConnection *conn;
 #endif
 gchar *reply = NULL;
@@ -118,7 +118,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                if ( !strcmp( tmux_cmd, TMUX_WINDOW_ADD ) ) {
                     if (scanf( "@%d", &workspace ) == 1 ) {
                          sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
-#ifdef USE_I3
+#ifndef __APPLE__
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          //g_printf("Reply: %s\n", reply);
                          g_free(reply);
@@ -131,7 +131,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                               /* I probably don't want to spawn my panes here... */
                               spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
                               /* Select the newly spawned urxvt window by its title */
-#ifdef USE_I3
+#ifndef __APPLE__
                               sprintf( i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
                               reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                               g_free(reply);
@@ -168,7 +168,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                          close( layout_fd );
                          g_free( layout_str );
                          sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
-#ifdef USE_I3
+#ifndef __APPLE__
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_free(reply);
 #endif
@@ -176,7 +176,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                          //remove ( tmpfile );
                          //sprintf( i3_cmd, "exec gnome-terminal" );
 #if 0
-#ifdef USE_I3
+#ifndef __APPLE__
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_printf("Reply: %s\n", reply);
                          g_free(reply);
@@ -203,7 +203,7 @@ gint main() {
      bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
      pthread_t tmux_read_thread;
 
-#ifdef USE_I3
+#ifndef __APPLE__
      conn = i3ipc_connection_new(NULL, NULL);
 #endif
 
@@ -247,7 +247,7 @@ gint main() {
 
      pthread_cancel( tmux_read_thread );
 
-#ifdef USE_I3
+#ifndef __APPLE__
      g_object_unref(conn);
 #endif
 

@@ -5,7 +5,7 @@
 #include <json-glib/json-glib.h>
 #include <string.h>
 typedef unsigned int uint_t;
-#ifdef USE_I3
+#ifndef __APPLE__
 typedef __u_char u_char;
 #else
 typedef unsigned char u_char;
