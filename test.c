@@ -7,11 +7,13 @@
  */
 
 #define _XOPEN_SOURCE
+#ifdef USE_I3
+#include <i3ipc-glib/i3ipc-glib.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <glib/gprintf.h>
 #include <json-glib/json-glib.h>
-#include <i3ipc-glib/i3ipc-glib.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -19,7 +21,11 @@
 #include "parse.h"
 #include <string.h>
 #include <strings.h>
+#ifdef USE_I3
 #include <pty.h>
+#else
+#include <util.h>
+#endif
 #include <termios.h>
 #include <unistd.h>
 #include <errno.h>
@@ -51,7 +57,9 @@ typedef unsigned int uint_t;
 #define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u"
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
+#ifdef USE_I3
 i3ipcConnection *conn;
+#endif
 gchar *reply = NULL;
 struct termios pane_io_settings;
 volatile int n_tmux_panes = 0;
@@ -67,8 +75,9 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      int fds, status;
      char buf2[10];
 
+     struct winsize test_size = { 0, 0, 1024, 768 };
      /* Open a new unused tty */
-     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
+     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, &test_size );
 
      // Save the existing flags
      int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
@@ -109,9 +118,11 @@ void* tmux_read_init( void* tmux_read_args ) {
                if ( !strcmp( tmux_cmd, TMUX_WINDOW_ADD ) ) {
                     if (scanf( "@%d", &workspace ) == 1 ) {
                          sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
+#ifdef USE_I3
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          //g_printf("Reply: %s\n", reply);
                          g_free(reply);
+#endif
                     }
                }
                else if ( !strcmp( tmux_cmd, "output" ) ) {
@@ -120,9 +131,11 @@ void* tmux_read_init( void* tmux_read_args ) {
                               /* I probably don't want to spawn my panes here... */
                               spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
                               /* Select the newly spawned urxvt window by its title */
+#ifdef USE_I3
                               sprintf( i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
                               reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                               g_free(reply);
+#endif
                          }
                          fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
                          fgets( buf, BUFSIZ, stdin); 
@@ -155,15 +168,19 @@ void* tmux_read_init( void* tmux_read_args ) {
                          close( layout_fd );
                          g_free( layout_str );
                          sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
+#ifdef USE_I3
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_free(reply);
+#endif
                          /* Strategy move window to mark then kill the marked pane */
                          //remove ( tmpfile );
                          //sprintf( i3_cmd, "exec gnome-terminal" );
 #if 0
+#ifdef USE_I3
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_printf("Reply: %s\n", reply);
                          g_free(reply);
+#endif
 #endif
                     }
                }
@@ -186,7 +203,9 @@ gint main() {
      bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
      pthread_t tmux_read_thread;
 
+#ifdef USE_I3
      conn = i3ipc_connection_new(NULL, NULL);
+#endif
 
      /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
      bzero( &pane_io_settings, sizeof( pane_io_settings));
@@ -228,7 +247,9 @@ gint main() {
 
      pthread_cancel( tmux_read_thread );
 
+#ifdef USE_I3
      g_object_unref(conn);
+#endif
 
      return 0;
 }

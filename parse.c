@@ -5,7 +5,11 @@
 #include <json-glib/json-glib.h>
 #include <string.h>
 typedef unsigned int uint_t;
+#ifdef USE_I3
 typedef __u_char u_char;
+#else
+typedef unsigned char u_char;
+#endif
 
 #define ISODIGIT(c) ((int)(c) >= '0' && (int)(c) <= '7')
 char * unescape(char *orig)
@@ -109,7 +113,7 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
           return;
      }
      size_t n_scanned = sscanf((*tmux_layout), "%ux%u,%u,%u,%u", &sx, &sy, &xoff, &yoff, &wp_id);
-     if ( n_scanned = 5 )
+     if ( n_scanned == 5 )
           sprintf( wp_id_str, "pane_container%u", wp_id );
      else if ( n_scanned == 4 )
           *wp_id_str = '\0';
