@@ -124,9 +124,8 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
 
 /* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
 void* tmux_read_init( void* tmux_read_args ) {
-     char buf[BUFSIZ];
      char output_buf[BUFSIZ];
-     char input_buf[BUFSIZ];
+     char tmux_rx_line[BUFSIZ];
      /* TODO: What is a good command size? I probably eventually want to do this a different way */
      char tmux_cmd[BUFSIZ];
      char* i3_cmd;
@@ -136,8 +135,8 @@ void* tmux_read_init( void* tmux_read_args ) {
 
      while( 1 ) {
           /* Read in the entire line from tmux */
-          if ( fgets( input_buf, sizeof input_buf, stdin ) != NULL ) {
-               if (sscanf(input_buf, "%%output %%%d%*c%[^\n]", &pane, output_buf ) == 2) {
+          if ( fgets( tmux_rx_line, sizeof tmux_rx_line, stdin ) != NULL ) {
+               if (sscanf(tmux_rx_line, "%%output %%%d%*c%[^\n]", &pane, output_buf ) == 2) {
                     if ( !pane_info_ptrs[ pane ] ) {
                          /* I probably don't want to spawn my panes here... */
                          spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
@@ -161,7 +160,7 @@ void* tmux_read_init( void* tmux_read_args ) {
                     g_free(reply);
 #endif
                }
-               else if (sscanf( input_buf, "%%layout-change @%d %[^\n]", &workspace, output_buf ) == 2 ) {
+               else if (sscanf( tmux_rx_line, "%%layout-change @%d %[^\n]", &workspace, output_buf ) == 2 ) {
                     /* TODO: Do I need to remove the newline at the end of the layout string? */
                     /* retrieve the entire layout string */
                     char* parse_str = output_buf;
@@ -184,8 +183,8 @@ void* tmux_read_init( void* tmux_read_args ) {
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                     g_free(reply);
 #endif
+                    remove ( tmpfile );
                     /* Strategy move window to mark then kill the marked pane */
-                    //remove ( tmpfile );
                     //sprintf( i3_cmd, "exec gnome-terminal" );
 #if 0
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
@@ -211,7 +210,6 @@ gint main() {
      conn = i3ipc_connection_new(NULL, NULL);
 #endif
 
-     /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
      bzero( &pane_io_settings, sizeof( pane_io_settings));
 
      /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
@@ -220,16 +218,9 @@ gint main() {
      }*/
 
      /* We want to disable the canonical mode */
-     //pane_io_settings.c_lflag &= ~ICANON;
-     //pane_io_settings.c_lflag |= ECHO; /* TODO: AM I SURE I WANT THIS? */
      pane_io_settings.c_lflag &= ~(ICANON | ECHO);
      pane_io_settings.c_cc[VTIME]=0;
      pane_io_settings.c_cc[VMIN]=1;
-
-     //grantpt(fdm);
-     //unlockpt(fdm);
-
-     //printf("%s\n", ptsname(fdm));
 
      pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
 
