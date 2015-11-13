@@ -48,7 +48,16 @@ typedef unsigned int uint_t;
 <window_name>: [WxH] [history unsure/unsure, unsure bytes] %<pane_ix> (active)
 0: [80x24] [history 0/2000, 0 bytes] %3 (active) */
 /* TODO: later decide if certain inputs are useful */
-#define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u"
+#define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u (active)"
+
+#define TMUX_CONTROL_CMD_TX_LIST_PANES "list-panes"
+#define TMUX_CONTROL_CMD_TX_SEND_KEYS "send-keys"
+#define DEBUG
+#ifdef DEBUG
+#define debug(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define debug(...) ({})
+#endif
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
 i3ipcConnection *conn;
@@ -61,6 +70,17 @@ typedef struct {
 } TmuxPaneInfo_t;
 TmuxPaneInfo_t pane_infos[ 64 ]; /* Cap at 64 for now */
 TmuxPaneInfo_t* pane_info_ptrs[ 64 ]; /* Cap at 64 for now */
+
+void send_tmux_cmd( const char* command ) {
+     puts( command );
+     fflush( stdout );
+}
+
+void send_keys_to_pane( const char* keys, uint_t tmux_pane_index ) {
+     char* buffer;
+     asprintf( &buffer, "send-keys -t %d \"%s\"", tmux_pane_index, keys );
+     send_tmux_cmd( buffer );
+}
 
 void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      pid_t i;
@@ -98,87 +118,73 @@ void* tmux_read_init( void* tmux_read_args ) {
      char buf[BUFSIZ];
      char output_buf[BUFSIZ];
      char input_buf[BUFSIZ];
+     /* TODO: What is a good command size? I probably eventually want to do this a different way */
      char tmux_cmd[BUFSIZ];
-     char i3_cmd[BUFSIZ];
+     char* i3_cmd;
      char bufchar;
      char endc;
      int workspace, n_scanned, pane;
+
      while( 1 ) {
-          if (scanf( "%%%s ", tmux_cmd ) == 1 ) {
-               /* REACHED LINE END */
-               if ( !strcmp( tmux_cmd, TMUX_WINDOW_ADD ) ) {
-                    if (scanf( "@%d", &workspace ) == 1 ) {
-                         sprintf( i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
-                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                         //g_printf("Reply: %s\n", reply);
-                         g_free(reply);
-                    }
-               }
-               else if ( !strcmp( tmux_cmd, "output" ) ) {
-                    if (scanf( "%%%d", &pane ) == 1) {
-                         if ( !pane_info_ptrs[ pane ] ) {
-                              /* I probably don't want to spawn my panes here... */
-                              spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
-                              /* Select the newly spawned urxvt window by its title */
-                              sprintf( i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
-                              reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                              g_free(reply);
-                         }
-                         fgetc(stdin); /* READ A SINGLE SPACE FROM AFTER THE PANE */
-                         fgets( buf, BUFSIZ, stdin); 
-                         //printf( "%s", buf);
-                         buf[(strlen(buf)-1)] = '\0';
-                         int out_len = sprintf( output_buf, "%s", unescape(buf));
-                         //fflush(stdout);
-                         write( pane_info_ptrs[ pane ]->fd, output_buf, out_len );
-                         fsync( pane_info_ptrs[ pane ]->fd );
-                    }
-               }
-               else if ( !strcmp( tmux_cmd, TMUX_LAYOUT_CHANGE ) ) {
-                    if (scanf( "@%d", &workspace ) == 1 ) {
-                         /* TODO: Do I need to remove the newline at the end of the layout string? */
-                         /* retrieve the entire layout string */
-                         fgets( buf, BUFSIZ, stdin);
-                         char* parse_str = buf;
-                         /* Ignore checksum for now */
-                         char checksum[5];
-                         sscanf( parse_str, "%4s,", checksum );
-                         parse_str += 6;
-
-                         /* Maybe this method should also build a command string to launch panes/move panes to marks */
-                         gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
-
-                         char tmpfile[] = "/tmp/layout_XXXXXX";
-                         int layout_fd = mkstemp( tmpfile );
-                         fchmod( layout_fd, 0666 );
-                         dprintf( layout_fd, "%s", layout_str );
-                         close( layout_fd );
-                         g_free( layout_str );
-                         sprintf( i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
+          /* Read in the entire line from tmux */
+          if ( fgets( input_buf, sizeof input_buf, stdin ) != NULL ) {
+               if (sscanf(input_buf, "%%output %%%d %[^\n]", &pane, output_buf ) == 2) {
+                    if ( !pane_info_ptrs[ pane ] ) {
+                         /* I probably don't want to spawn my panes here... */
+                         spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
+                         /* Select the newly spawned urxvt window by its title */
+                         asprintf( &i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_free(reply);
-                         /* Strategy move window to mark then kill the marked pane */
-                         //remove ( tmpfile );
-                         //sprintf( i3_cmd, "exec gnome-terminal" );
+                    }
+                    char* pane_terminal_output;
+                    int out_len = asprintf(&pane_terminal_output, "%s", unescape(output_buf));
+                    /* TODO: Check return codes for write/fsync */
+                    write( pane_info_ptrs[ pane ]->fd, pane_terminal_output, out_len );
+                    fsync( pane_info_ptrs[ pane ]->fd );
+               }
+               else if (sscanf( "%%window-add @%d", tmux_cmd ) == 1 ) {
+                    asprintf( &i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
+                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                    g_free(reply);
+               }
+               else if (sscanf( input_buf, "%%layout-change @%d %[^\n]", &workspace, output_buf ) == 2 ) {
+                    /* TODO: Do I need to remove the newline at the end of the layout string? */
+                    /* retrieve the entire layout string */
+                    char* parse_str = output_buf;
+                    /* Ignore checksum for now */
+                    char checksum[5];
+                    sscanf( parse_str, "%4s,", checksum );
+                    parse_str += 6;
+
+                    /* Maybe this method should also build a command string to launch panes/move panes to marks */
+                    gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
+
+                    char tmpfile[] = "/tmp/layout_XXXXXX";
+                    int layout_fd = mkstemp( tmpfile );
+                    fchmod( layout_fd, 0666 );
+                    dprintf( layout_fd, "%s", layout_str );
+                    close( layout_fd );
+                    g_free( layout_str );
+                    asprintf( &i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
+                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                    g_free(reply);
+                    /* Strategy move window to mark then kill the marked pane */
+                    //remove ( tmpfile );
+                    //sprintf( i3_cmd, "exec gnome-terminal" );
 #if 0
-                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                         g_printf("Reply: %s\n", reply);
-                         g_free(reply);
+                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+                    g_printf("Reply: %s\n", reply);
+                    g_free(reply);
 #endif
-                    }
                }
-          }
-          else {
-               /* Seek to end of line */
-               fgets( buf, BUFSIZ, stdin); 
-               //printf("%s", buf);
-          }
-          bufchar = fgetc( stdin );
-          if ( bufchar == EOF )
-               return 0;
-          else
-               ungetc( bufchar, stdin );
+               bufchar = fgetc( stdin );
+               if ( bufchar == EOF )
+                    return 0;
+               else
+                    ungetc( bufchar, stdin );
 
+          }
      }
 }
 
@@ -220,8 +226,7 @@ gint main() {
                     /* WE HAVE DATA */
                     in_buffer[size]='\0';
                     /* TODO: I might want to listen for control keys here or something... */
-                    printf("send-keys -t %d \"%s\"\n", pane_infos[pane_ix].pane_number, in_buffer);
-                    fflush(stdout);
+                    send_keys_to_pane( in_buffer, pane_infos[pane_ix].pane_number );
                }
           }
      }
