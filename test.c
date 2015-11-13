@@ -7,11 +7,13 @@
  */
 
 #define _XOPEN_SOURCE
+#ifndef __APPLE__
+#include <i3ipc-glib/i3ipc-glib.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <glib/gprintf.h>
 #include <json-glib/json-glib.h>
-#include <i3ipc-glib/i3ipc-glib.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -19,7 +21,11 @@
 #include "parse.h"
 #include <string.h>
 #include <strings.h>
+#ifndef __APPLE__
 #include <pty.h>
+#else
+#include <util.h>
+#endif
 #include <termios.h>
 #include <unistd.h>
 #include <errno.h>
@@ -60,7 +66,9 @@ typedef unsigned int uint_t;
 #endif
 
 /* ALL THESE GLOBALS WILL BE FIXED UP */
+#ifndef __APPLE__
 i3ipcConnection *conn;
+#endif
 gchar *reply = NULL;
 struct termios pane_io_settings;
 volatile int n_tmux_panes = 0;
@@ -87,8 +95,9 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      int fds, status;
      char buf2[10];
 
+     struct winsize test_size = { 0, 0, 1024, 768 };
      /* Open a new unused tty */
-     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
+     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, &test_size );
 
      // Save the existing flags
      int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
@@ -134,8 +143,10 @@ void* tmux_read_init( void* tmux_read_args ) {
                          spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
                          /* Select the newly spawned urxvt window by its title */
                          asprintf( &i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
+#ifndef __APPLE__
                          reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                          g_free(reply);
+#endif
                     }
                     char* pane_terminal_output;
                     int out_len = asprintf(&pane_terminal_output, "%s", unescape(output_buf));
@@ -145,8 +156,10 @@ void* tmux_read_init( void* tmux_read_args ) {
                }
                else if (sscanf( "%%window-add @%d", tmux_cmd ) == 1 ) {
                     asprintf( &i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
+#ifdef __APPLE__
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                     g_free(reply);
+#endif
                }
                else if (sscanf( input_buf, "%%layout-change @%d %[^\n]", &workspace, output_buf ) == 2 ) {
                     /* TODO: Do I need to remove the newline at the end of the layout string? */
@@ -167,8 +180,10 @@ void* tmux_read_init( void* tmux_read_args ) {
                     close( layout_fd );
                     g_free( layout_str );
                     asprintf( &i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
+#ifndef __APPLE__
                     reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
                     g_free(reply);
+#endif
                     /* Strategy move window to mark then kill the marked pane */
                     //remove ( tmpfile );
                     //sprintf( i3_cmd, "exec gnome-terminal" );
@@ -192,7 +207,9 @@ gint main() {
      bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
      pthread_t tmux_read_thread;
 
+#ifndef __APPLE__
      conn = i3ipc_connection_new(NULL, NULL);
+#endif
 
      /* TRY OPENING A SINGLE TTY AND PUMPING THE OUTPUT TO IT */
      bzero( &pane_io_settings, sizeof( pane_io_settings));
@@ -233,7 +250,9 @@ gint main() {
 
      pthread_cancel( tmux_read_thread );
 
+#ifndef __APPLE__
      g_object_unref(conn);
+#endif
 
      return 0;
 }
