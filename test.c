@@ -137,7 +137,7 @@ void* tmux_read_init( void* tmux_read_args ) {
      while( 1 ) {
           /* Read in the entire line from tmux */
           if ( fgets( input_buf, sizeof input_buf, stdin ) != NULL ) {
-               if (sscanf(input_buf, "%%output %%%d %[^\n]", &pane, output_buf ) == 2) {
+               if (sscanf(input_buf, "%%output %%%d%*c%[^\n]", &pane, output_buf ) == 2) {
                     if ( !pane_info_ptrs[ pane ] ) {
                          /* I probably don't want to spawn my panes here... */
                          spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
