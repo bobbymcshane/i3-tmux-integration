@@ -65,10 +65,6 @@ void unregister_layout_change_handler( struct OnLayoutChange* handler )
 
 /* ---- END EVENT REGISTRATION FUNCTIONS ---- */
 
-/* NOTE: Eventually I think I would like to make a parse tree. For now, I will
- * simply use a series of if statements that are each checking for an entire
- * control command */
-
 #define HANDLE_EVENTS( head, ... ) do {                                       \
   __typeof__( (head)->lh_first ) handler;                                     \
   LIST_FOREACH( handler, head, entries )                                      \
@@ -77,6 +73,8 @@ void unregister_layout_change_handler( struct OnLayoutChange* handler )
   }                                                                           \
 } while(0)
 
+/* NOTE: Would it be better to do this if/else stuff with a hash on the first
+ * word in the line and a switch statement? */
 void tmux_event_loop( FILE* tmux_control_stream )
 {
   while( fgets( s, sizeof( s ), tmux_control_stream ) != NULL )
