@@ -38,14 +38,29 @@ void register_pane_output_handler( struct OnPaneOutput* handler )
   LIST_INSERT_HEAD( &pane_output_handlers, handler, entries );
 }
 
+void unregister_pane_output_handler( struct OnPaneOutput* handler )
+{
+  LIST_REMOVE( handler, entries );
+}
+
 void register_window_add_handler( struct OnWindowAdd* handler )
 {
   LIST_INSERT_HEAD( &window_add_handlers, handler, entries );
 }
 
+void unregister_window_add_handler( struct OnWindowAdd* handler )
+{
+  LIST_REMOVE( handler, entries );
+}
+
 void register_layout_change_handler( struct OnLayoutChange* handler )
 {
   LIST_INSERT_HEAD( &layout_change_handlers, handler, entries );
+}
+
+void unregister_layout_change_handler( struct OnLayoutChange* handler )
+{
+  LIST_REMOVE( handler, entries );
 }
 
 /* ---- END EVENT REGISTRATION FUNCTIONS ---- */

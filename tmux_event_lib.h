@@ -28,10 +28,13 @@ struct OnLayoutChange
 void tmux_event_init( );
 
 void register_pane_output_handler( struct OnPaneOutput* handler );
+void unregister_pane_output_handler( struct OnPaneOutput* handler );
 
 void register_window_add_handler( struct OnWindowAdd* handler );
+void unregister_window_add_handler( struct OnWindowAdd* handler );
 
 void register_layout_change_handler( struct OnLayoutChange* handler );
+void unregister_layout_change_handler( struct OnLayoutChange* handler );
 
 void tmux_event_loop( FILE* tmux_control_file_stream );
 
