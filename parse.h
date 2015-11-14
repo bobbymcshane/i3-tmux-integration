@@ -3,6 +3,6 @@
 #include <glib/gprintf.h>
 
 char * unescape(char *orig);
-gchar* tmux_layout_to_i3_layout( char* tmux_layout );
+gchar* tmux_layout_to_i3_layout( const char* tmux_layout );
 
 #endif /* #ifndef INCLUDED_PARSE_H */

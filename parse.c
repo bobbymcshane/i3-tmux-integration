@@ -96,7 +96,7 @@ char * unescape(char *orig)
      return (new);
 }
 
-void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
+void tmux_layout_to_i3_layout_impl( const char** tmux_layout, JsonBuilder* builder ) {
      GError *err = NULL;
      JsonParser *parser;
 
@@ -143,7 +143,7 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
           (*tmux_layout)++;
      if ((**tmux_layout) == ',') {
           /* TODO: Does the saved go before or after the increment? */
-          char* saved = (*tmux_layout);
+          const char* saved = (*tmux_layout);
           (*tmux_layout)++;
           while (isdigit((u_char) (**tmux_layout)))
                (*tmux_layout)++;
@@ -213,7 +213,7 @@ void tmux_layout_to_i3_layout_impl( char** tmux_layout, JsonBuilder* builder ) {
      return;
 }
 
-gchar* tmux_layout_to_i3_layout( char* tmux_layout ) {
+gchar* tmux_layout_to_i3_layout( const char* tmux_layout ) {
      JsonBuilder* builder = json_builder_new();
      tmux_layout_to_i3_layout_impl( &tmux_layout, builder );
 

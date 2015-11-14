@@ -7,6 +7,7 @@
  */
 
 #define _XOPEN_SOURCE
+#define _XOPEN_SOURCE_EXTENDED
 #ifndef __APPLE__
 #include <i3ipc-glib/i3ipc-glib.h>
 #endif
@@ -124,16 +125,85 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      n_tmux_panes++;
 }
 
-void print_layout_string( unsigned int window, const char* layout, void* ctxt )
+void handle_layout_change( unsigned int window, const char* layout, void* ctxt )
 {
-  printf( "New layout is %s\n", layout );
+  /* TODO: Do I need to remove the newline at the end of the layout string? */
+  /* retrieve the entire layout string */
+  const char* parse_str = layout;
+  /* Ignore checksum for now */
+  char checksum[5];
+  sscanf( parse_str, "%4s,", checksum );
+  parse_str += 6;
+
+  /* Maybe this method should also build a command string to launch panes/move panes to marks */
+  gchar *layout_str = tmux_layout_to_i3_layout( layout );
+
+  char tmpfile[] = "/tmp/layout_XXXXXX";
+  int layout_fd = mkstemp( tmpfile );
+  fchmod( layout_fd, 0666 );
+  dprintf( layout_fd, "%s", layout_str );
+  close( layout_fd );
+  g_free( layout_str );
+  char* i3_cmd;
+  asprintf( &i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, window );
+#ifndef __APPLE__
+  reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+  g_free(reply);
+#endif
+  free( i3_cmd );
+  //remove ( tmpfile );
+  /* Strategy move window to mark then kill the marked pane */
 }
-struct OnLayoutChange print_layout_string_handler = { { NULL }, print_layout_string, NULL };
+
+struct OnLayoutChange layout_change_handler = { { NULL }, handle_layout_change, NULL };
+
+void handle_window_add( unsigned int window, void* ctxt )
+{
+  /* Get the layout for the new window */
+  send_tmux_cmd( TMUX_CONTROL_CMD_TX_LIST_PANES );
+
+  char* i3_cmd;
+  asprintf( &i3_cmd, I3_WORKSPACE_ADD_CMD, window );
+#ifdef __APPLE__
+  reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+  g_free(reply);
+#endif
+  free( i3_cmd );
+}
+
+struct OnWindowAdd window_add_handler = { { NULL }, handle_window_add, NULL };
+
+void handle_pane_output( unsigned int pane, const char* output, void* ctxt )
+{
+  if ( !pane_info_ptrs[ pane ] ) {
+    /* I probably don't want to spawn my panes here... */
+    spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
+    /* Select the newly spawned urxvt window by its title */
+    char* i3_cmd;
+    asprintf( &i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
+#ifndef __APPLE__
+    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
+    g_free(reply);
+#endif
+    free( i3_cmd );
+  }
+  char* pane_terminal_output;
+  char* output_copy = strdup( output );
+  int out_len = asprintf(&pane_terminal_output, "%s", unescape(output_copy));
+  /* TODO: Check return codes for write/fsync */
+  write( pane_info_ptrs[ pane ]->fd, pane_terminal_output, out_len );
+  fsync( pane_info_ptrs[ pane ]->fd );
+  free( output_copy );
+}
+
+struct OnPaneOutput pane_output_handler = { { NULL }, handle_pane_output, NULL };
 
 /* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
 void* tmux_read_init( void* tmux_read_args ) {
   tmux_event_init( );
-  register_layout_change_handler( &print_layout_string_handler );
+  register_pane_output_handler( &pane_output_handler );
+  register_window_add_handler( &window_add_handler );
+  register_layout_change_handler( &layout_change_handler );
   tmux_event_loop( stdin );
 #if 0
      char* output_buf;
