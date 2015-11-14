@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <pthread.h>
+#include "tmux_event_lib.h"
 
 typedef unsigned int uint_t;
 #define I3_WORKSPACE_ADD_CMD "workspace tmux %d"
@@ -123,8 +124,18 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      n_tmux_panes++;
 }
 
+void print_layout_string( unsigned int window, const char* layout, void* ctxt )
+{
+  printf( "New layout is %s\n", layout );
+}
+struct OnLayoutChange print_layout_string_handler = { { NULL }, print_layout_string, NULL };
+
 /* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
 void* tmux_read_init( void* tmux_read_args ) {
+  tmux_event_init( );
+  register_layout_change_handler( &print_layout_string_handler );
+  tmux_event_loop( stdin );
+#if 0
      char* output_buf;
      char tmux_rx_line[BUFSIZ];
      /* TODO: What is a good command size? I probably eventually want to do
@@ -211,6 +222,7 @@ void* tmux_read_init( void* tmux_read_args ) {
 
           }
      }
+#endif
 }
 
 gint main() {
