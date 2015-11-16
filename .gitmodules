@@ -1,3 +1,6 @@
 [submodule "i3ipc-glib"]
 	path = i3ipc-glib
 	url = https://github.com/bobbymcshane/i3ipc-glib.git
+[submodule "C-Tmux-Control-Mode"]
+	path = C-Tmux-Control-Mode
+	url = git@github.com:bobbymcshane/C-Tmux-Control-Mode.git
