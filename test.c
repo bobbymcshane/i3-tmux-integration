@@ -60,6 +60,7 @@ typedef unsigned int uint_t;
 
 #define TMUX_CONTROL_CMD_TX_LIST_PANES "list-panes"
 #define TMUX_CONTROL_CMD_TX_SEND_KEYS "send-keys"
+#define TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( columns, rows ) "refresh-client -C "#columns","#rows
 #define DEBUG
 #ifdef DEBUG
 #define debug(...) fprintf(stderr, __VA_ARGS__)
@@ -202,8 +203,8 @@ struct OnPaneOutput pane_output_handler = { { NULL }, handle_pane_output, NULL }
 void* tmux_read_init( void* tmux_read_args ) {
   tmux_event_init( );
   register_pane_output_handler( &pane_output_handler );
-  register_window_add_handler( &window_add_handler );
-  register_layout_change_handler( &layout_change_handler );
+  //register_window_add_handler( &window_add_handler );
+  //register_layout_change_handler( &layout_change_handler );
   tmux_event_loop( stdin );
 #if 0
      char* output_buf;
@@ -296,48 +297,49 @@ void* tmux_read_init( void* tmux_read_args ) {
 }
 
 gint main() {
-     bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
-     pthread_t tmux_read_thread;
+  send_tmux_cmd( TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( 191, 47 ) );
+  bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
+  pthread_t tmux_read_thread;
 
 #ifndef __APPLE__
-     conn = i3ipc_connection_new(NULL, NULL);
+  conn = i3ipc_connection_new(NULL, NULL);
 #endif
 
-     bzero( &pane_io_settings, sizeof( pane_io_settings));
+  bzero( &pane_io_settings, sizeof( pane_io_settings));
 
-     /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
-          printf("Error getting current terminal settings, %s\n", strerror(errno));
-          return -1;
-     }*/
+  /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
+    printf("Error getting current terminal settings, %s\n", strerror(errno));
+    return -1;
+    }*/
 
-     /* We want to disable the canonical mode */
-     pane_io_settings.c_lflag &= ~(ICANON | ECHO);
-     pane_io_settings.c_cc[VTIME]=0;
-     pane_io_settings.c_cc[VMIN]=1;
+  /* We want to disable the canonical mode */
+  pane_io_settings.c_lflag &= ~(ICANON | ECHO);
+  pane_io_settings.c_cc[VTIME]=0;
+  pane_io_settings.c_cc[VMIN]=1;
 
-     pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
+  pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
 
-     while ( 1 ) {
-          /* Check if the slave tty received any input */
-          int pane_ix;
-          for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
-               char in_buffer[BUFSIZ];
-               ssize_t size = read(pane_infos[pane_ix].fd, &in_buffer, sizeof(in_buffer));
-               if ( size > 0 ) {
-                    /* WE HAVE DATA */
-                    in_buffer[size]='\0';
-                    /* TODO: I might want to listen for control keys here or something... */
-                    send_keys_to_pane( in_buffer, pane_infos[pane_ix].pane_number );
-               }
-          }
-     }
+  while ( 1 ) {
+    /* Check if the slave tty received any input */
+    int pane_ix;
+    for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
+      char in_buffer[BUFSIZ];
+      ssize_t size = read(pane_infos[pane_ix].fd, &in_buffer, sizeof(in_buffer));
+      if ( size > 0 ) {
+        /* WE HAVE DATA */
+        in_buffer[size]='\0';
+        /* TODO: I might want to listen for control keys here or something... */
+        send_keys_to_pane( in_buffer, pane_infos[pane_ix].pane_number );
+      }
+    }
+  }
 
-     pthread_cancel( tmux_read_thread );
+  pthread_cancel( tmux_read_thread );
 
 #ifndef __APPLE__
-     g_object_unref(conn);
+  g_object_unref(conn);
 #endif
 
-     return 0;
+  return 0;
 }
 
