@@ -33,6 +33,7 @@
 #include <sys/select.h>
 #include <pthread.h>
 #include "tmux_event_lib.h"
+#include "compat/esc.h"
 
 typedef unsigned int uint_t;
 #define I3_WORKSPACE_ADD_CMD "workspace tmux %d"
@@ -88,9 +89,17 @@ void send_tmux_cmd( const char* command ) {
 }
 
 void send_keys_to_pane( const char* keys, uint_t tmux_pane_index ) {
-     char* buffer;
-     asprintf( &buffer, "send-keys -t %d \"%s\"", tmux_pane_index, keys );
-     send_tmux_cmd( buffer );
+  char* buffer;
+  char* escaped;
+  /* TODO: Figure out how to send a single quote and semicolon */
+  /* TODO: make a modified version of vis that really only cares about single
+   * quotes and semicolons. Semicolons need to be escaped, and single quotes
+   * need to be surrounded by double quotes. */
+  aestr( &escaped, keys );
+  asprintf( &buffer, "send-keys -t %d '%s'", tmux_pane_index, escaped );
+  send_tmux_cmd( buffer );
+  free( escaped );
+  free( buffer );
 }
 
 void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
@@ -98,10 +107,8 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
      int fds, status;
      char buf2[10];
 
-     /* TODO: Get window sizing working correctly */
-     struct winsize test_size = { 100, 100, 1024, 768 };
      /* Open a new unused tty */
-     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, &test_size );
+     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
 
      // Save the existing flags
      int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
@@ -206,94 +213,6 @@ void* tmux_read_init( void* tmux_read_args ) {
   //register_window_add_handler( &window_add_handler );
   //register_layout_change_handler( &layout_change_handler );
   tmux_event_loop( stdin );
-#if 0
-     char* output_buf;
-     char tmux_rx_line[BUFSIZ];
-     /* TODO: What is a good command size? I probably eventually want to do
-      * this a different way */
-     char tmux_cmd[BUFSIZ];
-     char* i3_cmd;
-     char bufchar;
-     char endc;
-     int workspace, n_scanned, pane;
-
-     while( 1 ) {
-          /* Read in the entire line from tmux */
-          if ( fgets( tmux_rx_line, sizeof tmux_rx_line, stdin ) != NULL ) {
-               if (sscanf(tmux_rx_line, "%%output %%%d%*c%m[^\n]", &pane, &output_buf ) == 2) {
-                    if ( !pane_info_ptrs[ pane ] ) {
-                         /* I probably don't want to spawn my panes here... */
-                         spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
-                         /* Select the newly spawned urxvt window by its title */
-                         asprintf( &i3_cmd, "[title=\"^pane%d$\"] move window to mark pane_container%1$d", pane );
-#ifndef __APPLE__
-                         reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                         g_free(reply);
-#endif
-                    }
-                    char* pane_terminal_output;
-                    int out_len = asprintf(&pane_terminal_output, "%s", unescape(output_buf));
-                    free( output_buf );
-                    /* TODO: Check return codes for write/fsync */
-                    write( pane_info_ptrs[ pane ]->fd, pane_terminal_output, out_len );
-                    fsync( pane_info_ptrs[ pane ]->fd );
-               }
-               else if (sscanf( tmux_rx_line, "%%window-add @%d", &workspace ) == 1 ) {
-                    /* Get the layout for the new window */
-                    send_tmux_cmd( TMUX_CONTROL_CMD_TX_LIST_PANES );
-
-                    asprintf( &i3_cmd, I3_WORKSPACE_ADD_CMD, workspace );
-#ifdef __APPLE__
-                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    g_free(reply);
-#endif
-               }
-               else if (sscanf( tmux_rx_line, "%%layout-change @%d %m[^\n]", &workspace, &output_buf ) == 2 ) {
-                    /* TODO: Do I need to remove the newline at the end of the layout string? */
-                    /* retrieve the entire layout string */
-                    char* parse_str = output_buf;
-                    /* Ignore checksum for now */
-                    char checksum[5];
-                    sscanf( parse_str, "%4s,", checksum );
-                    parse_str += 6;
-
-                    /* Maybe this method should also build a command string to launch panes/move panes to marks */
-                    gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
-
-                    char tmpfile[] = "/tmp/layout_XXXXXX";
-                    int layout_fd = mkstemp( tmpfile );
-                    fchmod( layout_fd, 0666 );
-                    dprintf( layout_fd, "%s", layout_str );
-                    close( layout_fd );
-                    g_free( layout_str );
-                    free( output_buf );
-                    asprintf( &i3_cmd, "workspace %s, append_layout %s, rename workspace to \"tmux %d\"", "tmp_workspace", tmpfile, workspace );
-#ifndef __APPLE__
-                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    g_free(reply);
-#endif
-                    remove ( tmpfile );
-                    /* Strategy move window to mark then kill the marked pane */
-                    //sprintf( i3_cmd, "exec gnome-terminal" );
-#if 0
-                    reply = i3ipc_connection_message(conn, I3IPC_MESSAGE_TYPE_COMMAND, i3_cmd, NULL);
-                    g_printf("Reply: %s\n", reply);
-                    g_free(reply);
-#endif
-               }
-               else {
-                    debug( "%s", tmux_rx_line );
-               }
-
-               bufchar = fgetc( stdin );
-               if ( bufchar == EOF )
-                    return 0;
-               else
-                    ungetc( bufchar, stdin );
-
-          }
-     }
-#endif
 }
 
 gint main() {
@@ -306,11 +225,6 @@ gint main() {
 #endif
 
   bzero( &pane_io_settings, sizeof( pane_io_settings));
-
-  /*if (tcgetattr(STDOUT_FILENO, &pane_io_settings)){
-    printf("Error getting current terminal settings, %s\n", strerror(errno));
-    return -1;
-    }*/
 
   /* We want to disable the canonical mode */
   pane_io_settings.c_lflag &= ~(ICANON | ECHO);

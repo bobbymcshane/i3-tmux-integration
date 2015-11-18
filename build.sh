@@ -1,1 +1,1 @@
-gcc -ggdb3 -I C-Tmux-Control-Mode -o test C-Tmux-Control-Mode/tmux_event_lib.c parse.c test.c $(pkg-config --libs --cflags json-glib-1.0) $(pkg-config --libs --cflags i3ipc-glib-1.0 2>/dev/null) -lutil -lpthread
+gcc -ggdb3 -I./C-Tmux-Control-Mode -I./compat -o test C-Tmux-Control-Mode/tmux_event_lib.c compat/esc.c parse.c test.c $(pkg-config --libs --cflags json-glib-1.0) $(pkg-config --libs --cflags i3ipc-glib-1.0 2>/dev/null) -lutil -lpthread
