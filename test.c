@@ -91,10 +91,6 @@ void send_tmux_cmd( const char* command ) {
 void send_keys_to_pane( const char* keys, uint_t tmux_pane_index ) {
   char* buffer;
   char* escaped;
-  /* TODO: Figure out how to send a single quote and semicolon */
-  /* TODO: make a modified version of vis that really only cares about single
-   * quotes and semicolons. Semicolons need to be escaped, and single quotes
-   * need to be surrounded by double quotes. */
   aestr( &escaped, keys );
   asprintf( &buffer, "send-keys -t %d '%s'", tmux_pane_index, escaped );
   send_tmux_cmd( buffer );
@@ -141,10 +137,10 @@ void handle_layout_change( unsigned int window, const char* layout, void* ctxt )
   /* Ignore checksum for now */
   char checksum[5];
   sscanf( parse_str, "%4s,", checksum );
-  parse_str += 6;
+  parse_str += 5;
 
   /* Maybe this method should also build a command string to launch panes/move panes to marks */
-  gchar *layout_str = tmux_layout_to_i3_layout( layout );
+  gchar *layout_str = tmux_layout_to_i3_layout( parse_str );
 
   char tmpfile[] = "/tmp/layout_XXXXXX";
   int layout_fd = mkstemp( tmpfile );
