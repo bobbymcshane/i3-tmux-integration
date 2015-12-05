@@ -59,9 +59,9 @@ typedef unsigned int uint_t;
 /* TODO: later decide if certain inputs are useful */
 #define TMUX_CONTROL_CMD_RX_LIST_PANES "%[^:]: [%ux%u] [history %*u/%*u, %*u bytes] %%%u (active)"
 
-#define TMUX_CONTROL_CMD_TX_LIST_PANES "list-panes"
-#define TMUX_CONTROL_CMD_TX_SEND_KEYS "send-keys"
-#define TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( columns, rows ) "refresh-client -C "#columns","#rows
+#define TMUX_CONTROL_CMD_TX_LIST_PANES "list-panes\n"
+#define TMUX_CONTROL_CMD_TX_SEND_KEYS "send-keys\n"
+#define TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( columns, rows ) "refresh-client -C "#columns","#rows"\n"
 #define DEBUG
 #ifdef DEBUG
 #define debug(...) fprintf(stderr, __VA_ARGS__)
@@ -83,19 +83,26 @@ typedef struct {
 TmuxPaneInfo_t pane_infos[ 64 ]; /* Cap at 64 for now */
 TmuxPaneInfo_t* pane_info_ptrs[ 64 ]; /* Cap at 64 for now */
 
-void send_tmux_cmd( const char* command ) {
-     puts( command );
-     fflush( stdout );
+void print_response( const char* response, void* ctxt __attribute__((__unused__)) ) {
+  fprintf( stderr, "Response line is: %s\n", response );
 }
+
+struct OnCommandResponse print_command_response = { { NULL }, print_response, NULL };
 
 void send_keys_to_pane( const char* keys, uint_t tmux_pane_index ) {
   char* buffer;
   char* escaped;
   aestr( &escaped, keys );
-  asprintf( &buffer, "send-keys -t %d '%s'", tmux_pane_index, escaped );
-  send_tmux_cmd( buffer );
+  asprintf( &buffer, "send-keys -t %d '%s'\n", tmux_pane_index, escaped );
+  send_tmux_command( stdout, buffer, &print_command_response );
   free( escaped );
   free( buffer );
+}
+
+void get_tmux_panes_for_window( uint_t tmux_window ) {
+  char* buffer;
+  asprintf( &buffer, TMUX_CONTROL_CMD_TX_LIST_PANES" -t %u\n", tmux_window );
+  send_tmux_command( stdout, buffer, &print_command_response );
 }
 
 void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
@@ -164,7 +171,7 @@ struct OnLayoutChange layout_change_handler = { { NULL }, handle_layout_change, 
 void handle_window_add( unsigned int window, void* ctxt )
 {
   /* Get the layout for the new window */
-  send_tmux_cmd( TMUX_CONTROL_CMD_TX_LIST_PANES );
+  send_tmux_command( stdout, TMUX_CONTROL_CMD_TX_LIST_PANES, &print_command_response );
 
   char* i3_cmd;
   asprintf( &i3_cmd, I3_WORKSPACE_ADD_CMD, window );
@@ -202,17 +209,18 @@ void handle_pane_output( unsigned int pane, const char* output, void* ctxt )
 
 struct OnPaneOutput pane_output_handler = { { NULL }, handle_pane_output, NULL };
 
-/* read args are unused for now. Later I will probably moe away from maintaining a global list of fds or something... */
+/* read args are unused for now. Later I will probably move away from maintaining a global list of fds or something... */
 void* tmux_read_init( void* tmux_read_args ) {
   tmux_event_init( );
   register_pane_output_handler( &pane_output_handler );
   //register_window_add_handler( &window_add_handler );
-  //register_layout_change_handler( &layout_change_handler );
+  register_layout_change_handler( &layout_change_handler );
   tmux_event_loop( stdin );
 }
 
 gint main() {
-  send_tmux_cmd( TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( 191, 47 ) );
+  fputs( TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( 191, 47 ), stdout );
+  fflush( stdout );
   bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
   pthread_t tmux_read_thread;
 
@@ -231,6 +239,7 @@ gint main() {
 
   while ( 1 ) {
     /* Check if the slave tty received any input */
+    /* TODO: Convert this code to use a select call so I don't burn my cpu */
     int pane_ix;
     for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
       char in_buffer[BUFSIZ];
