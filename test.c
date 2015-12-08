@@ -44,7 +44,6 @@ typedef unsigned int uint_t;
 /* LIST_SESSIONS_RX:
 <session_name>: <#> windows (created <date/time>) [WxH] (attached)
 0: 1 windows (created Fri Nov  6 16:42:43 2015) [80x24] (attached) */
-/* TODO: Can I use wildcards with scanf? */
 #define TMUX_CONTROL_CMD_RX_LIST_SESSIONS "%[^:]: %u windows (created %*[^)]) [%ux%u] (attached)"
 
 /* LIST_WINDOWS_RX:
@@ -82,6 +81,7 @@ typedef struct {
 } TmuxPaneInfo_t;
 TmuxPaneInfo_t pane_infos[ 64 ]; /* Cap at 64 for now */
 TmuxPaneInfo_t* pane_info_ptrs[ 64 ]; /* Cap at 64 for now */
+//fd_set pane_fds;
 
 void print_response( const char* response, void* ctxt __attribute__((__unused__)) ) {
   fprintf( stderr, "Response line is: %s\n", response );
@@ -112,12 +112,11 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
 
      /* Open a new unused tty */
      openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
-
-     // Save the existing flags
+#if 1
+     /* TODO: remove this when I start using select */
      int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
-     // Set the new flags with O_NONBLOCK
-
      fcntl(pane_infos[n_tmux_panes].fd, F_SETFL, saved_flags | O_NONBLOCK );
+#endif
 
      *pane_info_ptr = &pane_infos[n_tmux_panes];
      pane_infos[n_tmux_panes].pane_number = tmux_pane_number;
@@ -133,6 +132,10 @@ void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
           //waitpid(i, &status, 0); /* TODO: Do I need to do something with waitpid?
      }
 
+     /* Add the new pane's fd to the set of file descriptiors we are watching
+      * for activity to send to the tmux controller */
+     /* TODO: I don't think this is allowed... */
+     //FD_SET( pane_infos[n_tmux_panes].fd, &pane_fds );
      n_tmux_panes++;
 }
 
