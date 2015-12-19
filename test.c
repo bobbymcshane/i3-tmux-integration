@@ -30,7 +30,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <pthread.h>
 #include "tmux_event_lib.h"
 #include "compat/esc.h"
@@ -76,11 +76,14 @@ gchar *reply = NULL;
 struct termios pane_io_settings;
 volatile int n_tmux_panes = 0;
 typedef struct {
-     int fd;
-     int pane_number;
+  /* the fd to listen for pane_input on */
+  int fd;
+  /* the tmux pane_ix associated with this file descriptor */
+  int pane_number;
 } TmuxPaneInfo_t;
 TmuxPaneInfo_t pane_infos[ 64 ]; /* Cap at 64 for now */
 TmuxPaneInfo_t* pane_info_ptrs[ 64 ]; /* Cap at 64 for now */
+int epollfd;
 //fd_set pane_fds;
 
 void print_response( const char* response, void* ctxt __attribute__((__unused__)) ) {
@@ -105,38 +108,53 @@ void get_tmux_panes_for_window( uint_t tmux_window ) {
   send_tmux_command( stdout, buffer, &print_command_response );
 }
 
-void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
-     pid_t i;
-     int fds, status;
-     char buf2[10];
+/* listen for input on socket in_fd. if input is received, pass that input
+ * along to tmux pane_ix */
+static int add_read_socket( TmuxPaneInfo_t* ev_ctxt ) {
+  struct epoll_event* ev = malloc( sizeof( struct epoll_event ) );
+  ev->events = EPOLLIN;
+  /* this lets us associate the fd we are watching with its tmux pane number */
+  ev->data.ptr = ev_ctxt;
 
-     /* Open a new unused tty */
-     openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
+  return epoll_ctl( epollfd, EPOLL_CTL_ADD, ev_ctxt->fd, ev );
+}
+
+void spawn_tmux_pane( TmuxPaneInfo_t** pane_info_ptr, int tmux_pane_number ) {
+  pid_t i;
+  int fds, status;
+  char buf2[10];
+
+  /* Open a new unused tty */
+  openpty( &pane_infos[n_tmux_panes].fd, &fds, NULL, &pane_io_settings, NULL );
 #if 1
-     /* TODO: remove this when I start using select */
-     int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
-     fcntl(pane_infos[n_tmux_panes].fd, F_SETFL, saved_flags | O_NONBLOCK );
+  /* TODO: remove this when I start using select */
+  //int saved_flags = fcntl(pane_infos[n_tmux_panes].fd, F_GETFL);
+  //fcntl(pane_infos[n_tmux_panes].fd, F_SETFL, saved_flags | O_NONBLOCK );
 #endif
 
-     *pane_info_ptr = &pane_infos[n_tmux_panes];
-     pane_infos[n_tmux_panes].pane_number = tmux_pane_number;
-     i = fork();
-     if ( i == 0 ) { // child
-          /* Spawn a urxvt terminal which looks at the specified pty */
-          sprintf(buf2, "/usr/bin/urxvt -title pane%d -pty-fd %d", tmux_pane_number, fds);
-          system(buf2);
-          exit(0);
-     } else {  // parent
-          //dprintf(fdm,"Where do I pop up?\n");
-          //printf("Where do I pop up - 2?\n");
-          //waitpid(i, &status, 0); /* TODO: Do I need to do something with waitpid?
-     }
+  *pane_info_ptr = &pane_infos[n_tmux_panes];
+  pane_infos[n_tmux_panes].pane_number = tmux_pane_number;
+  i = fork();
+  if( i == 0 ) { // child
+    /* Spawn a urxvt terminal which looks at the specified pty */
+    sprintf(buf2, "/usr/bin/urxvt -title pane%d -pty-fd %d", tmux_pane_number, fds);
+    system(buf2);
+    exit(0);
+  } else {  // parent
+    //dprintf(fdm,"Where do I pop up?\n");
+    //printf("Where do I pop up - 2?\n");
+    //waitpid(i, &status, 0); /* TODO: Do I need to do something with waitpid?
+  }
 
-     /* Add the new pane's fd to the set of file descriptiors we are watching
-      * for activity to send to the tmux controller */
-     /* TODO: I don't think this is allowed... */
-     //FD_SET( pane_infos[n_tmux_panes].fd, &pane_fds );
-     n_tmux_panes++;
+  /* Add the new pane's fd to the set of file descriptiors we are watching
+   * for activity to send to the tmux controller */
+  /* TODO: I don't think this is allowed... */
+  //FD_SET( pane_infos[n_tmux_panes].fd, &pane_fds );
+  if( add_read_socket( *pane_info_ptr ) == -1 ) {
+    /* TODO: handle epoll_ctl errors */
+  }
+
+  n_tmux_panes++;
 }
 
 void handle_layout_change( unsigned int window, const char* layout, void* ctxt )
@@ -189,7 +207,7 @@ struct OnWindowAdd window_add_handler = { { NULL }, handle_window_add, NULL };
 
 void handle_pane_output( unsigned int pane, const char* output, void* ctxt )
 {
-  if ( !pane_info_ptrs[ pane ] ) {
+  if( !pane_info_ptrs[ pane ] ) {
     /* I probably don't want to spawn my panes here... */
     spawn_tmux_pane( &pane_info_ptrs[ pane ], pane );
     /* Select the newly spawned urxvt window by its title */
@@ -224,7 +242,7 @@ void* tmux_read_init( void* tmux_read_args ) {
 gint main() {
   fputs( TMUX_CONTROL_CMD_TX_RESIZE_CLIENT( 191, 47 ), stdout );
   fflush( stdout );
-  bzero ( pane_info_ptrs, sizeof ( pane_info_ptrs ) );
+  bzero( pane_info_ptrs, sizeof( pane_info_ptrs ) );
   pthread_t tmux_read_thread;
 
 #ifndef __APPLE__
@@ -238,20 +256,37 @@ gint main() {
   pane_io_settings.c_cc[VTIME]=0;
   pane_io_settings.c_cc[VMIN]=1;
 
+#define MAX_EVENTS 64
+  epollfd = epoll_create( MAX_EVENTS );
+  if( epollfd == -1 ) {
+    /* TODO: handle errors */
+    return -1;
+  }
+
   pthread_create( &tmux_read_thread, NULL, tmux_read_init, NULL );
 
-  while ( 1 ) {
-    /* Check if the slave tty received any input */
-    /* TODO: Convert this code to use a select call so I don't burn my cpu */
-    int pane_ix;
-    for ( pane_ix = 0; pane_ix < n_tmux_panes; pane_ix++ ) {
+  struct epoll_event events[ MAX_EVENTS ];
+  bzero( events, sizeof( events ) );
+
+  while( 1 ) {
+    int nfds = epoll_wait( epollfd, events, MAX_EVENTS, -1 );
+    if( nfds == -1 ) {
+      /* TODO: handle errors */
+      return -1;
+    }
+    /* TODO: Finish epoll impl... */
+
+    /* we received input for nfds. send this input to the appropriate tmux panes */
+    int ev_ix;
+    for( ev_ix = 0; ev_ix < nfds; ev_ix++ ) {
       char in_buffer[BUFSIZ];
-      ssize_t size = read(pane_infos[pane_ix].fd, &in_buffer, sizeof(in_buffer));
-      if ( size > 0 ) {
+      TmuxPaneInfo_t* ev_ctxt = events[ev_ix].data.ptr;
+      ssize_t size = read(ev_ctxt->fd, &in_buffer, sizeof(in_buffer));
+      if( size > 0 ) {
         /* WE HAVE DATA */
         in_buffer[size]='\0';
         /* TODO: I might want to listen for control keys here or something... */
-        send_keys_to_pane( in_buffer, pane_infos[pane_ix].pane_number );
+        send_keys_to_pane( in_buffer, ev_ctxt->pane_number );
       }
     }
   }
